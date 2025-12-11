@@ -89,6 +89,7 @@ pub fn write(
 
     const parent_entry = try map.get(interface);
 
+    if (self.description) |d| try d.write(writer, "\t\t/// ");
     try writer.print("\t\tpub const {s}Event = struct {{\n", .{name});
     try writer.print("\t\t\tpub const _opcode = {d};\n", .{opcode});
     try writer.writeAll("\t\t\tpub const _signature = \"");
@@ -105,17 +106,23 @@ pub fn write(
     });
     try writer.writeAll("\";\n");
     try writer.print("\t\t\t{s}: {s}.{s},\n", .{ interface, parent_entry.protocol, parent_entry.type_name });
-    for (self.args.items) |arg| switch (arg.type) {
-        .new_id => |ifce| {
-            const entry = try map.get(ifce);
-            try writer.print("\t\t\t{s}: {s}.{s},\n", .{ arg.name, entry.protocol, entry.type_name });
-        },
-        else => {
-            try writer.print("\t\t\t{s}: ", .{arg.name});
-            try arg.writeTypeString(gpa, writer, map);
-        },
-        // else => try arg.write(gpa, writer, map),
-    };
+    for (self.args.items) |arg| {
+        if (arg.description) |d|
+            try d.write(writer, "\t\t\t/// ")
+        else if (arg.summary) |s|
+            try Description.printSummary(s, "\t\t\t/// ", writer);
+
+        switch (arg.type) {
+            .new_id => |ifce| {
+                const entry = try map.get(ifce);
+                try writer.print("\t\t\t{s}: {s}.{s},\n", .{ arg.name, entry.protocol, entry.type_name });
+            },
+            else => {
+                try writer.print("\t\t\t{s}: ", .{arg.name});
+                try arg.writeTypeString(gpa, writer, map);
+            },
+        }
+    }
     try writer.writeAll("\t\t};\n");
 }
 

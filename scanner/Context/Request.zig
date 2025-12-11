@@ -93,6 +93,7 @@ pub fn write(
     try writer.print("\t\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
     try writer.print("\t\tpub const {s}_request_length = {d};\n", .{ self.name, max_length });
 
+    if (self.description) |d| try d.write(writer, "\t\t/// ");
     try for (self.args.items) |arg| switch (arg.type) {
         .new_id => break self.writeConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         .any_new_id => break try self.writeAnyConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),

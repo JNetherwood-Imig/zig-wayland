@@ -118,7 +118,13 @@ pub fn deinit(self: *Arg, gpa: Allocator) void {
 }
 
 pub fn write(self: *const Arg, gpa: Allocator, writer: *std.Io.Writer, map: *const InterfaceMap) !void {
+    if (self.description) |d|
+        try d.write(writer, "\t\t\t/// ")
+    else if (self.summary) |s|
+        try Description.printSummary(s, "\t\t\t/// ", writer);
+
     try writer.print("\t\t\t{s}_: ", .{self.name});
+
     try self.writeTypeString(gpa, writer, map);
 }
 
