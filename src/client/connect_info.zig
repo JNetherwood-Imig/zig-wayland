@@ -1,9 +1,27 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const core = @import("core");
 const posix = std.posix;
+const log = std.log.scoped(.wayland);
 const Connection = core.Connection;
 const Buffers = Connection.Buffers;
 const IdAllocator = core.IdAllocator;
+
+const getenv = posix.getenv;
+const c = if (builtin.link_libc) struct {
+    pub extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+} else struct {};
+
+fn unsetenv(name: [:0]const u8) void {
+    if (builtin.link_libc) {
+        _ = c.unsetenv(name.ptr);
+        return;
+    }
+
+    std.log.warn("Globally unsetting environment variables does not work without linking libc.", .{});
+    std.log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
+    std.log.warn("Unless you know what you're doing, it is recommended to link with libc.", .{});
+}
 
 pub const ConnectError = error{
     InvalidWaylandSocket,
@@ -32,6 +50,7 @@ pub const ConnectInfo = union(enum) {
         // First try to get WAYLAND_SOCKET environment variable and parse it as a file descriptor.
         if (posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
             if (std.fmt.parseInt(posix.fd_t, wayland_socket, 10)) |raw_fd| {
+                unsetenv(wayland_socket);
                 return .{ .sock = raw_fd };
             } else |_| {} // If parsing fails, ignore it and continue to next strategy
         }
