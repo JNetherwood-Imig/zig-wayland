@@ -123,9 +123,7 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
 }
 
 const std = @import("std");
-const util = @import("util");
 const core = @import("core");
-const cmsg = util.cmsg;
 const wire = core.wire;
 const log = std.log.scoped(.wayland_client);
 const Allocator = std.mem.Allocator;

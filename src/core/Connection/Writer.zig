@@ -1,6 +1,7 @@
 const std = @import("std");
-const cmsg = @import("util").cmsg;
+const cmsg = @import("cmsg.zig");
 const posix = std.posix;
+const Buffer = @import("Buffer.zig");
 
 const Writer = @This();
 
@@ -70,21 +71,3 @@ pub fn flush(self: *Writer) !void {
 
     _ = try posix.sendmsg(self.socket, &msg, 0);
 }
-
-const Buffer = struct {
-    buffer: []u8,
-    end: usize,
-
-    pub fn write(self: *Buffer, data: []const u8) !usize {
-        const written = @min(data.len, self.buffer.len - self.end);
-        @memcpy(self.buffer[self.end .. self.end + written], data[0..written]);
-        self.end += written;
-        return written;
-    }
-
-    pub fn flush(self: *Buffer) []const u8 {
-        const data = self.buffer[0..self.end];
-        self.end = 0;
-        return data;
-    }
-};

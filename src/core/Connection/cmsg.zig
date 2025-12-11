@@ -3,19 +3,6 @@ const posix = std.posix;
 const testing = std.testing;
 const talloc = testing.allocator;
 
-pub fn MsgUnion(comptime count: usize) type {
-    return extern union {
-        header: Header,
-        buffer: [space(count)]u8,
-
-        pub fn init() @This() {
-            var self = std.mem.zeroes(@This());
-            self.header = .{ .len = length(count) };
-            return self;
-        }
-    };
-}
-
 pub const Header = extern struct {
     len: usize,
     level: c_int = posix.SOL.SOCKET,

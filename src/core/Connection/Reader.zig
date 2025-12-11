@@ -1,0 +1,85 @@
+const std = @import("std");
+const cmsg = @import("cmsg.zig");
+const wire = @import("../wire.zig");
+const posix = std.posix;
+const Buffer = @import("Buffer.zig");
+
+const Reader = @This();
+
+socket: posix.fd_t,
+data: Buffer,
+fds: Buffer,
+
+pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Reader {
+    return .{
+        .socket = socket,
+        .data = .{ .buffer = data_buf },
+        .fds = .{ .buffer = fd_buf },
+    };
+}
+
+pub fn readIncoming(self: *Reader) !void {
+    var buf: [4096]u8 = undefined;
+    var iov = [1]posix.iovec{.{ .base = &buf, .len = buf.len }};
+
+    var control: [cmsg.space(20)]u8 align(8) = @splat(0);
+
+    var msg = posix.msghdr{
+        .name = null,
+        .namelen = 0,
+        .iov = &iov,
+        .iovlen = 1,
+        .control = &control,
+        .controllen = control.len,
+        .flags = 0,
+    };
+
+    const bytes_received = recvmsg(self.socket, &msg, posix.MSG.DONTWAIT);
+}
+
+pub fn nextHeader(self: *Reader) ?wire.Header {
+    return if (self.data.read(@sizeOf(wire.Header))) |bytes|
+        std.mem.bytesToValue(wire.Header, bytes)
+    else
+        null;
+}
+
+pub fn nextFd(self: *Reader) ?posix.fd_t {
+    return if (self.fds.read(@sizeOf(posix.fd_t))) |bytes|
+        std.mem.bytesToValue(posix.fd_t, bytes)
+    else
+        null;
+}
+
+pub fn getData(self: *Reader, len: usize) ?[]const u8 {
+    return self.data.read(len);
+}
+
+// FIX
+// Taken from zig 0.16 std.posix since we don't have it yet
+fn recvmsg(sockfd: posix.fd_t, msg: *posix.msghdr, flags: u32) !usize {
+    while (true) {
+        const rc = std.os.linux.recvmsg(sockfd, msg, flags);
+        switch (posix.errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .AGAIN => return error.WouldBlock,
+            .BADF => unreachable, // always a race condition
+            .NFILE => return error.SystemFdQuotaExceeded,
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            .INTR => continue,
+            .FAULT => unreachable, // An invalid user space address was specified for an argument.
+            .INVAL => unreachable, // Invalid argument passed.
+            .ISCONN => unreachable, // connection-mode socket was connected already but a recipient was specified
+            .NOBUFS => return error.SystemResources,
+            .NOMEM => return error.SystemResources,
+            .NOTCONN => return error.SocketUnconnected,
+            .NOTSOCK => unreachable, // The file descriptor sockfd does not refer to a socket.
+            .MSGSIZE => return error.MessageOversize,
+            .PIPE => return error.BrokenPipe,
+            .OPNOTSUPP => unreachable, // Some bit in the flags argument is inappropriate for the socket type.
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .NETDOWN => return error.NetworkDown,
+            else => |err| return posix.unexpectedErrno(err),
+        }
+    }
+}
