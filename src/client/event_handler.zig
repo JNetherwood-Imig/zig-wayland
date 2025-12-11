@@ -78,7 +78,7 @@ pub fn EventHandler(comptime protocol: type) type {
                 std.debug.assert(conn.reader.getData(buf[0 .. header.length - 8]) == header.length - 8);
                 for (self.proxies.items) |proxy| {
                     if (proxy.id == header.object) {
-                        return deserializeEvent(header, proxy.interface, buf[0 .. header.length - 8], &.{});
+                        return deserializeEvent(header, proxy.interface, buf[0 .. header.length - 8], conn);
                     }
                 }
             }
@@ -96,15 +96,21 @@ pub fn EventHandler(comptime protocol: type) type {
             header: wire.Header,
             target_interface: [:0]const u8,
             bytes: []const u8,
-            fds: []const std.posix.fd_t,
+            conn: *Connection,
         ) protocol.Event {
+            @setEvalBranchQuota(10000);
             inline for (@typeInfo(protocol.Event).@"union".fields) |field| {
                 if (std.mem.eql(u8, field.name, target_interface)) {
                     const sub_fields = @typeInfo(field.type).@"union".fields;
                     switch (header.opcode) {
                         inline 0...sub_fields.len - 1 => |i| {
                             const sub_field = sub_fields[i];
-                            var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, fds);
+                            const fd_count = comptime countFds(sub_field.type);
+                            var fds: [fd_count]std.posix.fd_t = undefined;
+                            for (0..fd_count) |fd_index| {
+                                fds[fd_index] = conn.reader.nextFd().?;
+                            }
+                            var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, &fds);
                             @field(data, std.meta.fields(@TypeOf(data))[0].name) = @enumFromInt(header.object);
                             const sub_ev = @unionInit(field.type, sub_field.name, data);
                             const ev = @unionInit(protocol.Event, field.name, sub_ev);
@@ -112,15 +118,6 @@ pub fn EventHandler(comptime protocol: type) type {
                         },
                         else => @panic("Invalid opcode."),
                     }
-                    // inline for (@typeInfo(field.type).@"union".fields, 0..) |sub_field, i| {
-                    //     if (i == header.opcode) {
-                    //         var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, fds);
-                    //         @field(data, std.meta.fields(@TypeOf(data))[0].name) = @enumFromInt(header.object);
-                    //         const sub_ev = @unionInit(field.type, sub_field.name, data);
-                    //         const ev = @unionInit(protocol.Event, field.name, sub_ev);
-                    //         return ev;
-                    //     }
-                    // }
                 }
             }
             @panic("Invalid opcode");
