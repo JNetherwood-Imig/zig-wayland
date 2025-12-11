@@ -4,7 +4,7 @@ const protocol = @import("protocol");
 const wl = protocol.wayland;
 const xdg = protocol.xdg_shell;
 // Construct event handler type for default protocols
-const EventHandler = wayland.EventHandler(protocol);
+const EventHandler = wayland.client.EventHandler(protocol);
 
 const width = 256;
 const height = 256;
@@ -23,13 +23,13 @@ var surf = wl.Surface.null_handle;
 pub fn main() !void {
     // Create ID allocator backed by small buffer
     var id_buf: [16]u32 = undefined;
-    var ida_state = wayland.FixedBufferIdAllocator.init(&id_buf);
+    var ida_state = wayland.IdAllocator.Bounded.init(&id_buf, .client);
     const ida = ida_state.id_allocator();
 
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
     // Create connection using buffers
-    conn = try wayland.ConnectInfo.getDefault().connect(ida, &buffers);
+    conn = try wayland.client.ConnectInfo.getDefault().connect(ida, &buffers);
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;

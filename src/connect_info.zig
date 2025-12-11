@@ -1,33 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const core = @import("core");
 const posix = std.posix;
 const log = std.log.scoped(.wayland);
-const Connection = core.Connection;
-const Buffers = Connection.Buffers;
-const IdAllocator = core.IdAllocator;
-
-const getenv = posix.getenv;
-const c = if (builtin.link_libc) struct {
-    pub extern "c" fn unsetenv(name: [*:0]const u8) c_int;
-} else struct {};
-
-fn unsetenv(name: [:0]const u8) void {
-    if (builtin.link_libc) {
-        _ = c.unsetenv(name.ptr);
-        return;
-    }
-
-    std.log.warn("Globally unsetting environment variables does not work without linking libc.", .{});
-    std.log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
-    std.log.warn("Unless you know what you're doing, it is recommended to link with libc.", .{});
-}
-
-pub const ConnectError = error{
-    InvalidWaylandSocket,
-    NoXdgRuntimeDir,
-    NameTooLong,
-} || posix.ConnectError || posix.SocketError;
+const Connection = @import("Connection.zig");
+const IdAllocator = @import("IdAllocator.zig");
 
 /// Describes the various pieces of information that can be used to connect to a wayland server.
 /// This can also be used to debug failing connections, as it implements `format` and can provide
@@ -83,11 +59,17 @@ pub const ConnectInfo = union(enum) {
         return .{ .path = path };
     }
 
+    pub const ConnectError = error{
+        InvalidWaylandSocket,
+        NoXdgRuntimeDir,
+        NameTooLong,
+    } || posix.ConnectError || posix.SocketError;
+
     /// Returns an established `Connection` based on `self`.
     pub fn connect(
         self: ConnectInfo,
         ida: IdAllocator,
-        buffers: *Buffers,
+        buffers: *Connection.Buffers,
     ) ConnectError!Connection {
         const handle = conn: switch (self) {
             .sock => |fd| fd: {
@@ -141,3 +123,18 @@ pub const ConnectInfo = union(enum) {
         }
     }
 };
+
+const c = if (builtin.link_libc) struct {
+    pub extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+} else struct {};
+
+fn unsetenv(name: [:0]const u8) void {
+    if (builtin.link_libc) {
+        _ = c.unsetenv(name.ptr);
+        return;
+    }
+
+    std.log.warn("Globally unsetting environment variables does not work without linking libc.", .{});
+    std.log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
+    std.log.warn("Unless you know what you're doing, it is recommended to link with libc.", .{});
+}

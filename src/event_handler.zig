@@ -1,8 +1,7 @@
 const std = @import("std");
-const core = @import("core");
-const wire = core.wire;
+const wire = @import("wire.zig");
+const Connection = @import("Connection.zig");
 const Allocator = std.mem.Allocator;
-const Connection = core.Connection;
 
 /// Construct an event handler to handle events present in the `protocol` type.
 /// This makes it possible to generate code for custom protocols and pass the resulting type here

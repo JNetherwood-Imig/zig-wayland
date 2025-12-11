@@ -2,6 +2,9 @@
 
 const IdAllocator = @This();
 
+pub const Bounded = @import("IdAllocator/Bounded.zig");
+pub const Unbounded = @import("IdAllocator/Unbounded.zig");
+
 /// Pointer to backing state.
 context: *anyopaque,
 vtable: VTable,
