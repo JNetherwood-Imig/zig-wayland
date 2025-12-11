@@ -414,12 +414,18 @@ const Context = struct {
         }
 
         pub fn calculateMaxLength(self: *const Request) usize {
-            var length: usize = 0;
+            var length: usize = 8; // Start at size of message header
+
             for (self.args.items) |arg| switch (arg.type) {
+                // Strings and arrays have an undefined size,
+                // so we can only assume the maximum capacity, as asserted by libwayland
                 .array, .string, .optional_string, .any_new_id => return 4096,
+                // Fds are not serialized on the wire, but sent via ancillary
                 .fd => {},
+                // Everything else is serialized as a 32 bit integer
                 else => length += 4,
             };
+
             return length;
         }
     };
