@@ -71,6 +71,7 @@ pub fn deinit(self: *Enum, gpa: Allocator) void {
 pub fn write(self: *const Enum, gpa: Allocator, writer: *std.Io.Writer) !void {
     const name = try util.snakeToPascal(gpa, self.name);
     defer gpa.free(name);
+    if (self.description) |d| try d.write(writer, "\t\t/// ");
     return switch (self.type) {
         .none => self.writeNormal(writer, name),
         .bitfield => self.writeBitfield(writer, name),
@@ -81,6 +82,10 @@ pub fn writeNormal(self: *const Enum, writer: *std.Io.Writer, name: []const u8) 
     try writer.print("\t\tpub const {s} = enum(i32) {{\n", .{name});
     for (self.entries.items) |entry| {
         const is_invalid = !std.zig.isValidId(entry.name);
+        if (entry.description) |d|
+            try d.write(writer, "\t\t\t/// ")
+        else if (entry.summary) |s|
+            try Description.printSummary(s, "\t\t\t/// ", writer);
         try writer.print("\t\t\t{s}{s}{s} = {d},\n", .{
             if (is_invalid) "@\"" else "",
             entry.name,
@@ -109,6 +114,10 @@ pub fn writeBitfield(
             bit += 1;
         }
 
+        if (entry.description) |d|
+            try d.write(writer, "\t\t\t/// ")
+        else if (entry.summary) |s|
+            try Description.printSummary(s, "\t\t\t/// ", writer);
         try writer.print("\t\t\t{s}: bool = false,\n", .{entry.name});
     }
 

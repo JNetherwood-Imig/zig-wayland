@@ -93,6 +93,7 @@ pub fn write(
     try writer.print("\t\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
     try writer.print("\t\tpub const {s}_request_length = {d};\n", .{ self.name, max_length });
 
+    if (self.description) |d| try d.write(writer, "\t\t/// ");
     try for (self.args.items) |arg| switch (arg.type) {
         .new_id => break self.writeConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         .any_new_id => break try self.writeAnyConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
@@ -260,7 +261,7 @@ fn writeSerialize(
     fn_name: []const u8,
 ) !void {
     try writer.print(
-        "\t\tpub fn serialize{c}{s}(\n",
+        "\t\tfn serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
     try writer.print("\t\t\tself: {s},\n", .{interface_type});

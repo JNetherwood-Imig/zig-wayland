@@ -102,6 +102,7 @@ pub fn write(
     const map_entry = try map.get(self.name);
     const type_name = map_entry.type_name;
 
+    if (self.description) |d| try d.write(writer, "\t/// ");
     try writer.print("\tpub const {s} = enum(u32) {{\n", .{type_name});
     try writer.writeAll("\t\tnull_handle = 0,\n");
     try writer.writeAll("\t\t_,\n");
