@@ -1,7 +1,15 @@
 const Connection = @This();
 
+const libwayland_max_message_size = 4096;
+const libwayland_max_fds = 20;
+const control_buffer_max_size = cmsg.space(libwayland_max_fds);
+
 handle: std.posix.fd_t,
 ida: IdAllocator,
+read_buf: [libwayland_max_message_size]u8,
+read_fd_buf: [control_buffer_max_size]u8,
+write_buf: [libwayland_max_message_size]u8,
+write_fd_buf: [control_buffer_max_size]u8,
 
 pub fn connect(info: ConnectInfo, ida: IdAllocator) ConnectError!Connection {
     const handle = conn: switch (info) {
