@@ -175,7 +175,7 @@ fn deserializeEvent(
     inline for (ti.fields) |field| if (std.mem.eql(u8, field.name, target_interface)) {
         const sub_fields = @typeInfo(field.type).@"union".fields;
         switch (header.opcode) {
-            inline 0...sub_fields.len => |i| {
+            inline 0...sub_fields.len - 1 => |i| {
                 const sub_field = sub_fields[i];
 
                 const fd_count = comptime countFds(sub_field.type);
