@@ -261,7 +261,7 @@ fn writeSerialize(
     fn_name: []const u8,
 ) !void {
     try writer.print(
-        "\t\tpub fn serialize{c}{s}(\n",
+        "\t\tfn serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
     try writer.print("\t\t\tself: {s},\n", .{interface_type});
