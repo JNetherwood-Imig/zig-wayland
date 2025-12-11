@@ -76,8 +76,30 @@ pub fn deinit(self: *Event, gpa: Allocator) void {
     self.args.deinit(gpa);
 }
 
+pub fn write(
+    self: *const Event,
+    gpa: Allocator,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+    interface: []const u8,
+    opcode: usize,
+) !void {
+    const name = try util.snakeToPascal(gpa, self.name);
+    defer gpa.free(name);
+
+    const parent_entry = try map.get(interface);
+
+    try writer.print("\t\tpub const {s}_event_opcode = {d};\n", .{ self.name, opcode });
+    try writer.print("\t\tpub const {s}Event = struct {{\n", .{name});
+    try writer.print("\t\t\t{s}: {s}.{s},\n", .{ interface, parent_entry.protocol, parent_entry.type_name });
+    for (self.args.items) |arg| try arg.write(writer, map);
+    try writer.writeAll("\t\t};\n");
+}
+
 const std = @import("std");
 const xml = @import("xml");
+const util = @import("util.zig");
 const Description = @import("Description.zig");
 const Arg = @import("Arg.zig");
+const InterfaceMap = @import("InterfaceMap.zig");
 const Allocator = std.mem.Allocator;

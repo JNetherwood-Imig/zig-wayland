@@ -109,12 +109,15 @@ pub fn write(
     for (0..self.version) |v| try writer.print("\t\t\tv{d},\n", .{v + 1});
     try writer.writeAll("\t\t};\n");
     try writer.print(
-        "\t\tpub fn id(self: {s}) u32 {{\n\t\t\treturn @intFromEnum(self);\n\t\t}}\n",
+        "\t\tpub fn getId(self: {s}) u32 {{\n\t\t\treturn @intFromEnum(self);\n\t\t}}\n",
         .{type_name},
     );
 
     for (self.requests.items, 0..) |request, opcode|
         try request.write(gpa, writer, map, self.name, opcode);
+
+    for (self.events.items, 0..) |event, opcode|
+        try event.write(gpa, writer, map, self.name, opcode);
 
     try writer.writeAll("\t};\n");
 }
@@ -138,19 +141,13 @@ pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]c
         }
         break :name name;
     };
-    var output = try std.ArrayList(u8).initCapacity(gpa, stripped_name.len);
-    var it = std.mem.tokenizeScalar(u8, stripped_name, '_');
 
-    while (it.next()) |tok| {
-        output.appendAssumeCapacity(std.ascii.toUpper(tok[0]));
-        if (tok.len > 1) output.appendSliceAssumeCapacity(tok[1..]);
-    }
-
-    return try output.toOwnedSlice(gpa);
+    return util.snakeToPascal(gpa, stripped_name);
 }
 
 const std = @import("std");
 const xml = @import("xml");
+const util = @import("util.zig");
 const InterfaceMap = @import("InterfaceMap.zig");
 const Description = @import("Description.zig");
 const Request = @import("Request.zig");

@@ -9,7 +9,7 @@ pub fn MsgUnion(comptime count: usize) type {
         buffer: [space(count)]u8,
 
         pub fn init() @This() {
-            return .{ .header = length(count) };
+            return .{ .header = .{ .cmsg_len = length(count) } };
         }
     };
 }

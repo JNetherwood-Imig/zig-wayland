@@ -1,7 +1,6 @@
 pub const DynamicIdAllocator = @import("client/DynamicIdAllocator.zig");
+pub const EventHandler = @import("client/EventHandler.zig");
 pub const FixedBufferIdAllocator = @import("client/FixedBufferIdAllocator.zig");
-pub const Display = @import("client/Display.zig");
-pub const Registry = @import("client/Registry.zig");
 pub const protocol = @import("protocol");
 pub const Connection = core.Connection;
 pub const Fixed = core.Fixed;
@@ -14,5 +13,5 @@ pub fn getConnectInfo() Connection.ConnectInfo {
 const core = @import("core");
 
 test {
-    @import("std").testing.refAllDecls(@This());
+    @import("std").testing.refAllDeclsRecursive(@This());
 }

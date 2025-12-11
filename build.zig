@@ -26,8 +26,8 @@ pub fn build(b: *std.Build) void {
     });
     core.addImport("util", util);
 
-    const client_protocol = makeProtoocl("client", b, target, optimize, scanner, core);
-    const server_protocol = makeProtoocl("server", b, target, optimize, scanner, core);
+    const client_protocol = makeProtoocl("client", b, target, optimize, scanner, util, core);
+    const server_protocol = makeProtoocl("server", b, target, optimize, scanner, util, core);
 
     const client = b.createModule(.{
         .target = target,
@@ -46,6 +46,14 @@ pub fn build(b: *std.Build) void {
     server.addImport("util", util);
     server.addImport("core", core);
     server.addImport("protocol", server_protocol);
+
+    const client_test_exe = b.addTest(.{ .root_module = client });
+    const server_test_exe = b.addTest(.{ .root_module = server });
+    const run_client_test = b.addRunArtifact(client_test_exe);
+    const run_server_test = b.addRunArtifact(server_test_exe);
+    const test_step = b.step("test", "Run all tests.");
+    test_step.dependOn(&run_client_test.step);
+    test_step.dependOn(&run_server_test.step);
 
     const wayland_book = b.addExecutable(.{
         .name = "wayland-book",
@@ -89,6 +97,7 @@ fn makeProtoocl(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     scanner: *std.Build.Step.Compile,
+    util: *std.Build.Module,
     core: *std.Build.Module,
 ) *std.Build.Module {
     const wayland_dep = b.dependency("wayland", .{});
@@ -112,6 +121,9 @@ fn makeProtoocl(
         .target = target,
         .optimize = optimize,
         .root_source_file = output,
-        .imports = &.{.{ .name = "core", .module = core }},
+        .imports = &.{
+            .{ .name = "core", .module = core },
+            .{ .name = "util", .module = util },
+        },
     });
 }

@@ -23,18 +23,18 @@ pub fn connect(info: ConnectInfo) ConnectError!Connection {
         },
         .fallback => continue :conn .{ .name = "wayland-0" },
     };
+
     return Connection{ .handle = handle };
 }
 
-pub fn close(self: Connection) void {
+pub fn close(self: *Connection) void {
     std.posix.close(self.handle);
 }
 
-pub fn sendMessage(
-    self: *Connection,
-    buffer: []const u8,
-) !void {
-    try posix.send(self.handle.raw, buffer, 0);
+pub fn sendMessage(self: *Connection, buffer: []const u8) !void {
+    const header = std.mem.bytesAsValue(wire.Header, buffer[0..8]);
+    _ = try posix.send(self.handle, buffer[0..header.length], 0);
+    log.debug("Sent {any}.", .{buffer[0..header.length]});
 }
 
 pub fn sendMessageWithFds(
@@ -43,7 +43,8 @@ pub fn sendMessageWithFds(
     comptime fd_count: usize,
     fds: []const i32,
 ) !void {
-    const control = cmsg.MsgUnion(fd_count).init();
+    const header = std.mem.bytesAsValue(wire.Header, buffer[0..8]);
+    var control = cmsg.MsgUnion(fd_count).init();
     @memcpy(
         cmsg.data(&control.header)[0 .. fd_count * @sizeOf(i32)],
         std.mem.sliceAsBytes(fds),
@@ -51,12 +52,13 @@ pub fn sendMessageWithFds(
     const msg = posix.msghdr_const{
         .name = null,
         .namelen = 0,
-        .iov = &.{posix.iovec_const{ .base = buffer.ptr, .len = buffer.len }},
+        .iov = &.{.{ .base = buffer.ptr, .len = header.length }},
         .iovlen = 1,
         .control = &control.buffer,
         .controllen = control.header.cmsg_len,
+        .flags = 0,
     };
-    try posix.sendmsg(self.handle.raw, &msg, 0);
+    _ = try posix.sendmsg(self.handle, &msg, 0);
 }
 
 pub const ConnectError = error{
@@ -113,8 +115,8 @@ pub const ConnectInfo = union(enum) {
 
 const std = @import("std");
 const util = @import("util");
-const log = std.log.scoped(.wayland);
+const wire = @import("wire.zig");
+const log = std.log.scoped(.wayland_client);
 const posix = std.posix;
-const wire = util.wire;
 const cmsg = util.cmsg;
 const Writer = std.Io.Writer;

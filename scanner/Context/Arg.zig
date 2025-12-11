@@ -118,16 +118,8 @@ pub fn deinit(self: *Arg, gpa: Allocator) void {
 }
 
 pub fn write(self: *const Arg, writer: *std.Io.Writer, map: *const InterfaceMap) !void {
-    if (self.type == .new_id) return;
-    if (self.type == .any_new_id) return writeAnyNewId(writer);
-
     try writer.print("\t\t\t{s}: ", .{self.name});
     try self.writeTypeString(writer, map);
-}
-
-pub fn writeAnyNewId(writer: *std.Io.Writer) !void {
-    try writer.writeAll("\t\t\t\tcomptime Interface: type,\n");
-    try writer.writeAll("\t\t\t\tversion: Interface.Version,\n");
 }
 
 fn writeTypeString(
@@ -154,6 +146,8 @@ fn writeTypeString(
             .string => "[:0]const u8",
             .optional_string => "?[:0]const u8",
             .fd => "i32", // FIXME: should this be std.posix.fd_t?
+            .new_id => "u32",
+            .any_new_id => "core.wire.GenericNewId",
             else => unreachable,
         };
         try writer.writeAll(simple_type);
