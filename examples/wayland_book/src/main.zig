@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 pub const State = struct {
     conn: zwl.Connection,
-    id_alloc: zwl.IdAllocator,
+    id_alloc: zwl.ClientIdAllocator,
 
     display: wl.Display,
     registry: wl.Registry,

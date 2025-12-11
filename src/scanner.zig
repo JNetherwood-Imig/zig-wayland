@@ -2,7 +2,6 @@
 // TODO: interface map
 // TODO: requests
 // TODO: figure out event model
-// TODO: versioned interface types
 
 // usage: scanner (<input file>)+ -o <output file> -m <mode (client|server)>
 
@@ -17,62 +16,196 @@ pub fn main() !void {
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
-    var args = std.process.args();
-    _ = args.skip();
+    var ctx = try Context.init(gpa);
+    defer ctx.deinit(gpa);
 
-    const mode = mode: {
-        const mode_str = args.next() orelse return error.ExpectedMode;
-        if (std.mem.eql(u8, mode_str, "client")) break :mode CodegenMode.client;
-        if (std.mem.eql(u8, mode_str, "server")) break :mode CodegenMode.server;
-        return error.InvalidMode;
-    };
-
-    var collect_path: ?[]const u8 = null;
-    var prefix: ?[]const u8 = null;
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-c")) {
-            collect_path = args.next() orelse return error.ExpectedCollectPath;
-        } else if (std.mem.eql(u8, arg, "-p")) {
-            prefix = args.next() orelse return error.ExpectedPrefix;
-        } else {
-            const input_path = args.next() orelse return error.ExpectedInputPath;
-            const output_path = args.next() orelse return error.ExpectedOutputPath;
-            try genProtocol(gpa, mode, input_path, output_path, prefix orelse "");
-        }
+    const output_file = try std.fs.cwd().openFile(ctx.output_path);
+    defer output_file.close();
+    var writer = output_file.writer(&.{});
+    const w = &writer.interface;
+    for (ctx.protocols.items) |p| {
+        w.print("{f}\n", .{p});
     }
 }
 
-const Parser = struct {
+const Context = struct {
     mode: Mode,
     output_path: []const u8,
-    input_paths: std.ArrayList([]const u8),
-    context: Context,
+    current_interface: []const u8,
+    interface_map: InterfaceMap,
+    protocols: std.ArrayList(Protocol),
+
+    pub fn init(gpa: Allocator) !Context {
+        var mode: ?Mode = null;
+        var output_path: ?[]const u8 = null;
+        var interface_map = InterfaceMap.empty;
+        errdefer {
+            var it = interface_map.iterator();
+            while (it.next()) |entry| {
+                gpa.free(entry.key_ptr.*);
+            }
+            interface_map.deinit(gpa);
+        }
+        var protocols = try std.ArrayList(Protocol).initCapacity(gpa, 1);
+        errdefer protocols.deinit(gpa);
+        var prefix: []const u8 = "";
+        var raw_protocols = try std.ArrayList(xml.Document(RawProtocol)).initCapacity(gpa, 1);
+        defer {
+            for (raw_protocols.items) |*p| p.deinit(gpa);
+            raw_protocols.deinit(gpa);
+        }
+        var args = std.process.args();
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "-m")) {
+                const mode_str = args.next() orelse return error.ExpectedMode;
+                if (std.mem.eql(u8, mode_str, "client")) mode = .client;
+                if (std.mem.eql(u8, mode_str, "server")) mode = .server;
+                return error.InvalidMode;
+            } else if (std.mem.eql(u8, arg, "-o")) {
+                output_path = args.next() orelse return error.ExpectedOutputPath;
+            } else if (std.mem.eql(u8, arg, "-p")) {
+                prefix = args.next() orelse return error.ExpectedPrefix;
+            } else {
+                const path = args.next() orelse return error.ExpectedInputPath;
+                const input_file = try std.fs.cwd().openFile(path, .{});
+                defer input_file.close();
+                var file_reader = input_file.reader(&.{});
+                const reader = &file_reader.interface;
+                const data = try reader.allocRemaining(gpa, .unlimited);
+                defer gpa.free(data);
+                try raw_protocols.append(gpa, try xml.parse(xml.Document(RawProtocol), gpa, data));
+                prefix = "";
+            }
+        }
+
+        for (raw_protocols.items) |p| {
+            for (p.value.interfaces.value.items) |i| {
+                const stripped = if (std.mem.startsWith(u8, i.name.value, prefix))
+                    i.name.value[prefix.len..]
+                else
+                    i.name.value[0..];
+                const entry = InterfaceMapEntry{
+                    .protocol = try gpa.dupe(u8, p.value.name.value),
+                    .type_name = try snakeToPascal(gpa, stripped),
+                };
+                try interface_map.put(gpa, try gpa.dupe(u8, i.name.value), entry);
+            }
+        }
+
+        for (raw_protocols.items) |p| {
+            try protocols.append(gpa, Protocol.fromRaw(gpa, interface_map, p.value));
+        }
+
+        return Context{
+            .mode = mode orelse return error.NoModeSpecified,
+            .output_path = output_path orelse return error.NoOutputPathSpecified,
+            .current_interface = "",
+        };
+    }
+
+    pub fn deinit(self: *Context, gpa: Allocator) void {
+        var it = self.interface_map.iterator();
+        while (it.next()) |e| gpa.free(e.key_ptr.*);
+        self.interface_map.deinit(gpa);
+        for (self.protocols.items) |*p| p.deinit(gpa);
+        self.protocols.deinit(gpa);
+    }
 
     const Mode = enum { client, server };
 
-    const Context = struct {
-        current_protocol: Protocol,
-        current_interface: Interface,
+    const Input = struct {
+        path: []const u8,
+        prefix: ?[]const u8 = null,
+    };
+
+    const InterfaceMap = std.StringHashMapUnmanaged(InterfaceMapEntry);
+
+    const InterfaceMapEntry = struct {
+        protocol: []const u8,
+        type_name: []const u8,
     };
 
     const Protocol = struct {
         name: []const u8,
-        summary: ?[]const u8,
-        description: ?[]const u8,
+        summary: ?[]const u8 = null,
+        description: ?[]const u8 = null,
         interfaces: ArrayList(Interface),
+
+        pub fn fromRaw(gpa: Allocator, map: InterfaceMap, raw: RawProtocol) Protocol {
+            const name = try gpa.dupe(u8, raw.name.value);
+            errdefer gpa.free(name);
+            const summary = if (raw.description.value) |desc|
+                try gpa.dupe(u8, desc.summary.value)
+            else
+                null;
+            errdefer gpa.free(summary);
+            const description = if (raw.description.value) |desc|
+                try gpa.dupe(u8, desc.body.value)
+            else
+                null;
+            errdefer gpa.free(description);
+            var interfaces = try ArrayList(Interface).initCapacity(gpa, 4);
+            errdefer {
+                for (interfaces.items) |i| i.deinit(gpa);
+                interfaces.deinit(gpa);
+            }
+            for (raw.interfaces.value.items) |i| {
+                try interfaces.append(gpa, try Interface.fromRaw(gpa, map, i));
+            }
+            return .{
+                .name = name,
+                .summary = summary,
+                .description = description,
+                .interfaces = interfaces,
+            };
+        }
+
+        pub fn deinit(self: *Protocol, gpa: Allocator) void {
+            gpa.free(self.name);
+            if (self.summary) |s| gpa.free(s);
+            if (self.description) |d| gpa.free(d);
+            for (self.interfaces.items) |i| i.deinit(gpa);
+            self.interfaces.deinit(gpa);
+        }
+
+        pub fn format(self: Protocol, writer: *Writer) !void {
+            try writer.print("pub const {s} = struct {{\n", .{self.name});
+            try writer.writeAll("};\n");
+        }
     };
 
     const Interface = struct {
         name: []const u8,
         type_name: []const u8,
         max_version: u32,
-        summary: ?[]const u8,
-        description: ?[]const u8,
+        summary: ?[]const u8 = null,
+        description: ?[]const u8 = null,
+        has_destructor: bool = false,
+
+        pub fn fromRaw(gpa: Allocator, map: InterfaceMap, raw: RawInterface) !Interface {
+            const name = try gpa.dupe(u8, raw.name.value);
+            errdefer gpa.free(name);
+            _ = map;
+        }
+
+        pub fn deinit(self: *Interface, gpa: Allocator) void {
+            gpa.free(self.name);
+        }
     };
 
     const Request = struct {
         name: []const u8,
         fn_name: []const u8,
+        is_generic: bool = false,
+        return_type: []const u8 = "void",
+        is_destructor: bool = false,
+        args: ArrayList(Arg),
+    };
+
+    const Arg = struct {
+        name: []const u8,
+        type: []const u8,
+        nullable: bool = false,
     };
 };
 

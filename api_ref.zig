@@ -1,3 +1,38 @@
+const zwl = struct {
+    const std = @import("std");
+    pub const Connection = struct {
+        socket: i32,
+        proxies: std.ArrayList(Proxy),
+
+        pub fn validateRequest(
+            self: Connection,
+            id: u32,
+            deprecated_since: ?u32,
+            since: u32,
+        ) !void {
+            for (self.proxies.items) |proxy| {
+                if (proxy.id == id) {
+                    if (proxy.version < since)
+                        return error.InvalidRequest;
+                    if (deprecated_since) |ds| if (proxy.version > ds)
+                        return error.Deprecated;
+                }
+            }
+        }
+    };
+    pub const IdAllocator = struct {
+        next_id: u32,
+        pub fn alloc(self: *IdAllocator) !u32 {
+            return self.next_id;
+        }
+    };
+    const Proxy = struct {
+        id: u32,
+        version: u32,
+        interface: []const u8,
+    };
+};
+
 pub const protocol = struct {
     pub const wayland = struct {
         pub const Display = enum(u32) {
@@ -8,13 +43,22 @@ pub const protocol = struct {
 
             pub fn sync(
                 self: Display,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
             ) !Callback {
                 _ = self;
+                _ = connection;
+                return @enumFromInt(try ida.alloc());
             }
+
             pub fn getRegistry(
                 self: Display,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
             ) !Registry {
                 _ = self;
+                _ = connection;
+                return @enumFromInt(try ida.alloc());
             }
 
             pub const ErrorEvent = struct {
@@ -22,9 +66,11 @@ pub const protocol = struct {
                 code: u32,
                 message: []const u8,
             };
+
             pub const DeleteIdEvent = struct {
                 id: u32,
             };
+
             const Events = .{
                 ErrorEvent,
                 DeleteIdEvent,
@@ -54,13 +100,17 @@ pub const protocol = struct {
 
             pub fn bind(
                 self: Registry,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
                 comptime Interface: type,
                 version: Interface.Version,
                 name: u32,
             ) !Interface {
                 _ = self;
+                _ = connection;
                 _ = name;
                 _ = version;
+                return @enumFromInt(try ida.alloc());
             }
 
             pub const GlobalEvent = struct {
@@ -69,10 +119,12 @@ pub const protocol = struct {
                 interface: []const u8,
                 version: u32,
             };
+
             pub const GlobalRemoveEvent = struct {
                 self: Registry,
                 name: u32,
             };
+
             const Events = .{
                 GlobalEvent,
                 GlobalRemoveEvent,
@@ -94,13 +146,21 @@ pub const protocol = struct {
 
             pub fn createSurface(
                 self: Compositor,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
             ) !Surface {
                 _ = self;
+                _ = connection;
+                return @enumFromInt(try ida.alloc());
             }
             pub fn createRegion(
                 self: Compositor,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
             ) !Region {
                 _ = self;
+                _ = connection;
+                return @enumFromInt(try ida.alloc());
             }
         };
 
@@ -119,75 +179,100 @@ pub const protocol = struct {
 
             pub fn destroy(
                 self: Surface,
+                connection: zwl.Connection,
             ) !void {
                 _ = self;
+                _ = connection;
             }
+
             pub fn attach(
                 self: Surface,
+                connection: zwl.Connection,
                 buffer: Buffer,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = buffer;
             }
+
             pub fn damage(
                 self: Surface,
+                connection: zwl.Connection,
                 x: i32,
                 y: i32,
                 width: i32,
                 height: i32,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = x;
                 _ = y;
                 _ = width;
                 _ = height;
             }
+
             pub fn frame(
                 self: Surface,
+                connection: zwl.Connection,
+                ida: *zwl.IdAllocator,
             ) !Callback {
                 _ = self;
+                _ = connection;
+                return @enumFromInt(try ida.alloc());
             }
             pub fn setOpaqueRegion(
                 self: Surface,
+                connection: zwl.Connection,
                 region: ?Region,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = region;
             }
             pub fn setInputRegion(
                 self: Surface,
+                connection: zwl.Connection,
                 region: ?Region,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = region;
             }
             pub fn commit(
                 self: Surface,
+                connection: zwl.Connection,
             ) !void {
                 _ = self;
+                _ = connection;
             }
             pub fn setBufferTransform(
                 self: Surface,
+                connection: zwl.Connection,
                 transform: Output.Transform,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = transform;
             }
             pub fn setBufferScale(
                 self: Surface,
+                connection: zwl.Connection,
                 scale: i32,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = scale;
             }
             pub fn damageBuffer(
                 self: Surface,
+                connection: zwl.Connection,
                 x: i32,
                 y: i32,
                 width: i32,
                 height: i32,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = x;
                 _ = y;
                 _ = width;
@@ -195,10 +280,12 @@ pub const protocol = struct {
             }
             pub fn offset(
                 self: Surface,
+                connection: zwl.Connection,
                 x: i32,
                 y: i32,
             ) !void {
                 _ = self;
+                _ = connection;
                 _ = x;
                 _ = y;
             }
@@ -207,17 +294,21 @@ pub const protocol = struct {
                 self: Surface,
                 output: Output,
             };
+
             pub const LeaveEvent = struct {
                 self: Surface,
                 output: Output,
             };
+
             pub const PreferredBufferScaleEvent = struct {
                 factor: i32,
             };
+
             pub const PreferredBufferTransformEvent = struct {
                 self: Surface,
                 transform: Output.Transform,
             };
+
             const Events = .{
                 EnterEvent,
                 LeaveEvent,
@@ -363,6 +454,8 @@ pub const protocol = struct {
 const client_test = struct {
     const wl = protocol.wayland;
     const State = struct {
+        conn: zwl.Connection,
+        ida: zwl.IdAllocator,
         display: wl.Display,
         registry: wl.Registry,
         compositor: wl.Compositor,
@@ -370,11 +463,13 @@ const client_test = struct {
         outputs: @import("std").ArrayList(wl.Output),
 
         pub fn init() State {
+            const conn: zwl.Connection = undefined;
+            const ida: zwl.IdAllocator = undefined;
             const display: wl.Display = undefined;
-            const registry = try display.getRegistry();
-            const compositor = try registry.bind(wl.Compositor, .v6, 1);
-            const surface = try compositor.createSurface();
-            _ = surface;
+            const registry = try display.getRegistry(conn, &ida);
+            const compositor = try registry.bind(conn, &ida, wl.Compositor, .v6, 1);
+            const surface = try compositor.createSurface(conn, &ida);
+            surface.destroy(conn);
         }
     };
 };
