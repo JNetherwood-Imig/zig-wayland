@@ -135,10 +135,7 @@ fn writeNormal(
     for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
-        try writer.print(
-            "\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], {d}, &.{{\n",
-            .{fd_count},
-        );
+        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
             if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }
@@ -190,10 +187,7 @@ fn writeConstructor(
     for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
-        try writer.print(
-            "\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], {d}, &.{{\n",
-            .{fd_count},
-        );
+        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
             if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }
@@ -245,10 +239,7 @@ fn writeAnyConstructor(
     };
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
-        try writer.print(
-            "\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], {d}, &.{{\n",
-            .{fd_count},
-        );
+        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
             if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }

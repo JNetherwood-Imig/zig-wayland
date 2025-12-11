@@ -69,6 +69,7 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             buf: []u8,
         ) !?protocol.Event {
             _ = timeout;
+            try connection.writer.flush();
             while (true) {
                 var header: wire.Header = undefined;
                 var iov = [1]std.posix.iovec{.{ .base = @ptrCast(&header), .len = @sizeOf(wire.Header) }};

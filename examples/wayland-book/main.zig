@@ -27,7 +27,12 @@ pub fn main() !void {
     var ida_state = zwl.FixedBufferIdAllocator.init(&id_buf);
     const ida = ida_state.allocator();
 
-    conn = try zwl.getConnectInfo().connect(ida);
+    var read_buf: [4096]u8 = undefined;
+    var write_buf: [4096]u8 = undefined;
+    var fd_read_buf: [20]i32 = undefined;
+    var fd_write_buf: [20]i32 = undefined;
+
+    conn = try zwl.getConnectInfo().connect(ida, &read_buf, &write_buf, &fd_read_buf, &fd_write_buf);
     var proxy_buf: [16]zwl.EventHandler.Proxy = undefined;
     var handler = zwl.EventHandler.initBuffered(&proxy_buf);
 
@@ -115,5 +120,6 @@ fn createBuffer() !wl.Buffer {
     defer pool.destroy(&conn) catch {};
     const buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
     @memset(shm_data, 255);
+    try conn.writer.flush();
     return buffer;
 }
