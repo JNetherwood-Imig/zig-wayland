@@ -1,7 +1,6 @@
 const std = @import("std");
 const wayland = @import("wayland");
 const protocol = @import("protocol");
-const shm_util = @import("shm.zig");
 const wl = protocol.wayland;
 const xdg = protocol.xdg_shell;
 // Construct event handler type for default protocols
@@ -25,7 +24,7 @@ pub fn main() !void {
     // Create ID allocator backed by small buffer
     var id_buf: [16]u32 = undefined;
     var ida_state = wayland.FixedBufferIdAllocator.init(&id_buf);
-    const ida = ida_state.allocator();
+    const ida = ida_state.id_allocator();
 
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
@@ -121,7 +120,7 @@ fn createBuffer() !wl.Buffer {
     const stride = width * 4;
     const size = stride * height;
 
-    const fd = try shm_util.allocateShmFile(size);
+    const fd = try allocateShmFile(size);
     defer std.posix.close(fd);
 
     shm_data = try std.posix.mmap(
