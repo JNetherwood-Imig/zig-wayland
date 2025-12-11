@@ -32,7 +32,7 @@ pub inline fn padding(size: usize) usize {
 }
 
 pub inline fn length(count: usize) usize {
-    return @"align"(@sizeOf(Header) + count * @sizeOf(posix.fd_t));
+    return @"align"(@sizeOf(Header)) + count * @sizeOf(posix.fd_t);
 }
 
 pub inline fn space(count: usize) usize {
