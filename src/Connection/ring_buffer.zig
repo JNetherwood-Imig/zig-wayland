@@ -168,7 +168,9 @@ test "to iovec const" {
     try std.testing.expectEqual(2, rb.take());
     _ = rb.putMany(&items);
 
-    const iovs = rb.toIovecConst();
+    var iovs: [2]std.posix.iovec_const = undefined;
+    const count = rb.getIovecConst(&iovs);
+    try std.testing.expectEqual(count, 2);
     try std.testing.expectEqual(7 * @sizeOf(i32), iovs[0].len);
     try std.testing.expectEqual(2 * @sizeOf(i32), iovs[1].len);
 }

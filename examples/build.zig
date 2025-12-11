@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("hello-world/main.zig"),
         }),
     });
-    hello_world.root_module.addImport("wayland", wayland.module("client"));
+    hello_world.root_module.addImport("wayland", wayland.module("wayland_core"));
     hello_world.root_module.addImport("protocol", wayland.module("client-protocol"));
     b.installArtifact(hello_world);
 }

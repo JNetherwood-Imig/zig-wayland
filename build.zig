@@ -4,33 +4,16 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const core = b.createModule(.{
+    const core = b.addModule("wayland_core", .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/core.zig"),
+        .root_source_file = b.path("src/wayland_core.zig"),
     });
 
-    const client = b.addModule("client", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/client.zig"),
-    });
-    client.addImport("core", core);
-
-    const server = b.addModule("server", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/server.zig"),
-    });
-    server.addImport("core", core);
-
-    const client_test_exe = b.addTest(.{ .root_module = client });
-    const server_test_exe = b.addTest(.{ .root_module = server });
-    const run_client_test = b.addRunArtifact(client_test_exe);
-    const run_server_test = b.addRunArtifact(server_test_exe);
+    const test_exe = b.addTest(.{ .root_module = core });
+    const run_test = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run all tests.");
-    test_step.dependOn(&run_client_test.step);
-    test_step.dependOn(&run_server_test.step);
+    test_step.dependOn(&run_test.step);
 
     addProtocols(b, target, optimize, core, test_step);
 }

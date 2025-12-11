@@ -79,13 +79,13 @@ test "cmsg align" {
 }
 
 test "cmsg len" {
-    try testing.expectEqual(length(1), 24);
-    try testing.expectEqual(length(5), 40);
+    try testing.expectEqual(20, length(1));
+    try testing.expectEqual(36, length(5));
 }
 
 test "cmsg space" {
-    try testing.expectEqual(length(1), 24);
-    try testing.expectEqual(length(5), 40);
+    try testing.expectEqual(24, space(1));
+    try testing.expectEqual(40, space(5));
 }
 
 test "cmsg data" {
@@ -95,8 +95,8 @@ test "cmsg data" {
     @memcpy(buf[0..@sizeOf(Header)], std.mem.asBytes(&cmsg));
     @memcpy(buf[length(0) .. length(0) + 6], "Hello!");
 
-    try testing.expectEqual(data(cmsg_ptr)[0], 'H');
-    try testing.expectEqual(data(cmsg_ptr)[8], 0);
+    try testing.expectEqual(dataConst(cmsg_ptr)[0], 'H');
+    try testing.expectEqual(dataConst(cmsg_ptr)[8], 0);
 }
 
 test "cmsg first header" {
@@ -137,9 +137,9 @@ test "cmsg next header" {
     };
 
     var head = firstHeader(&msg).?;
-    try testing.expectEqual(0, data(head)[0]);
+    try testing.expectEqual(0, dataConst(head)[0]);
     for (1..8) |i| {
         head = nextHeader(&msg, @constCast(head)).?;
-        try testing.expectEqual(i, data(head)[0]);
+        try testing.expectEqual(i, dataConst(head)[0]);
     }
 }
