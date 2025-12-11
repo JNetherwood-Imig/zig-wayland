@@ -11,48 +11,60 @@ pub const ConnectError = error{
     NameTooLong,
 } || posix.ConnectError || posix.SocketError;
 
+/// Describes the various pieces of information that can be used to connect to a wayland server.
+/// This can also be used to debug failing connections, as it implements `format` and can provide
+/// a readable display of what information it was using to connect.
 pub const ConnectInfo = union(enum) {
-    socket: i32,
+    /// A raw socket file descriptor, already connected.
+    sock: posix.fd_t,
+    /// An endpoint name to be concatenated with `$XDG_RUNTIME_DIR`.
     name: []const u8,
+    /// An absolute path to the socket.
     path: []const u8,
+    /// Nothing cound be found in the environment,
+    /// so try `$XDG_RUNTIME_DIR/wayland-0` as a last resort.
     fallback: void,
 
+    /// Attempt to discover connection information in the process environment
+    /// using `$WAYLAND_SOCKET` (**IMPORTANT: see README**) and `$WAYLAND_DISPLAY`,
+    /// in conjunction with `$XDG_RUNTIME_DIR`
     pub fn getDefault() ConnectInfo {
+        // First try to get WAYLAND_SOCKET environment variable and parse it as a file descriptor.
         if (posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
-            if (std.fmt.parseInt(i32, wayland_socket, 10)) |raw_fd| {
-                return .{ .socket = raw_fd }; // TODO validate fd
-            } else |_| {}
+            if (std.fmt.parseInt(posix.fd_t, wayland_socket, 10)) |raw_fd| {
+                return .{ .sock = raw_fd };
+            } else |_| {} // If parsing fails, ignore it and continue to next strategy
         }
+
+        // Try to find WAYLAND_DISPLAY in environment.
+        // If it is an absolute path, return it as .path, otherwise as .name
         if (posix.getenv("WAYLAND_DISPLAY")) |wayland_display| {
             if (std.fs.path.isAbsolute(wayland_display))
                 return .{ .path = wayland_display }
             else
                 return .{ .name = wayland_display };
         }
+
+        // Nothing could be found, so hope for the best with XDG_RUNTIME_DIR/wayland-0
         return .fallback;
     }
 
+    /// Initialize a `ConnectInfo` by passing an already-connected file descriptor as `socket`.
     pub fn initSocket(socket: posix.fd_t) ConnectInfo {
-        return .{ .socket = socket };
+        return .{ .sock = socket };
     }
 
+    /// Initialize a `ConnectInfo` using a specific socket endpoint name.
     pub fn initName(name: []const u8) ConnectInfo {
         return .{ .name = name };
     }
 
+    /// Initialize a `ConnectInfo` using a specific absolute path.
     pub fn initPath(path: []const u8) ConnectInfo {
         return .{ .path = path };
     }
 
-    pub fn format(self: ConnectInfo, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        switch (self) {
-            .socket => |sock| try writer.print("socket fd '{d}'", .{sock}),
-            .name => |name| try writer.print("endpoint name '{s}'", .{name}),
-            .path => |path| try writer.print("path '{s}'", .{path}),
-            .fallback => try writer.writeAll("fallback 'wayland-0'"),
-        }
-    }
-
+    /// Returns an established `Connection` based on `self`.
     pub fn connect(
         self: ConnectInfo,
         ida: IdAllocator,
@@ -60,6 +72,8 @@ pub const ConnectInfo = union(enum) {
     ) ConnectError!Connection {
         const handle = conn: switch (self) {
             .socket => |fd| fd: {
+                // Slightly dirty (maybe temporary) code to confirm that fd is a valid fd
+                // and is a socket.
                 switch (posix.errno(std.os.linux.fcntl(fd, std.os.linux.F.GETFD, 0))) {
                     .SUCCESS => {
                         const stat = try posix.fstat(fd);
@@ -71,6 +85,7 @@ pub const ConnectInfo = union(enum) {
                 break :fd fd;
             },
             .name => |name| handle: {
+                // When connecting to an endpoint, we need XDG_RUNTIME_DIR
                 const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse
                     return error.NoXdgRuntimeDir;
                 var path_buf: [108]u8 = @splat(0);
@@ -95,5 +110,15 @@ pub const ConnectInfo = union(enum) {
             .reader = .init(handle, &buffers.data_in, &buffers.fds_in),
             .writer = .init(handle, &buffers.data_out, &buffers.fds_out),
         };
+    }
+
+    /// Format connect info to a writer for logging and/or debugging.
+    pub fn format(self: ConnectInfo, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        switch (self) {
+            .sock => |sock| try writer.print("socket fd '{d}'", .{sock}),
+            .name => |name| try writer.print("socket endpoint name '{s}'", .{name}),
+            .path => |path| try writer.print("socket absolute path '{s}'", .{path}),
+            .fallback => try writer.writeAll("fallback ($XDG_RUNTIME_DIR/wayland-0)"),
+        }
     }
 };

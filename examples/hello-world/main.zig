@@ -29,7 +29,7 @@ pub fn main() !void {
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
     // Create connection using buffers
-    conn = try wayland.getConnectInfo().connect(ida, &buffers);
+    conn = try wayland.ConnectInfo.getDefault().connect(ida, &buffers);
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;

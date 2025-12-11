@@ -21,8 +21,8 @@ pub fn init(handle: posix.fd_t, ida: IdAllocator, buffers: *Buffers) Connection 
     return .{
         .handle = handle,
         .ida = ida,
-        .reader = .init(handle, buffers.data_in, buffers.fds_in),
-        .writer = .init(handle, buffers.data_out, buffers.fds_out),
+        .reader = .init(handle, &buffers.data_in, &buffers.fds_in),
+        .writer = .init(handle, &buffers.data_out, &buffers.fds_out),
     };
 }
 

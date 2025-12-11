@@ -103,6 +103,8 @@ pub fn EventHandler(comptime protocol: type) type {
             }
         }
 
+        pub const GetEventError = Connection.FlushError || Connection.PollEventsError;
+
         /// Try to get an event from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
         pub fn getNextEvent(
@@ -121,8 +123,6 @@ pub fn EventHandler(comptime protocol: type) type {
                 if (try self.nextEvent(connection, true)) |ev| return ev;
             }
         }
-
-        pub const GetEventError = Connection.FlushError || Connection.PollEventsError;
 
         fn nextEvent(
             self: *const Self,
