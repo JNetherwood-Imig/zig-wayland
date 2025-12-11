@@ -275,7 +275,8 @@ fn writeSerialize(
         try writer.writeAll("\t\t\t\t.{\n");
         for (self.args.items) |arg| switch (arg.type) {
             .fd => {},
-            .string, .optional_string => try writer.print("\t\t\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
+            .string => try writer.print("\t\t\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
+            .optional_string => try writer.print("\t\t\t\t\tcore.wire.String.initNullable({s}_),\n", .{arg.name}),
             .array => try writer.print("\t\t\t\t\tcore.wire.Array.init({s}_),\n", .{arg.name}),
             .optional_object => try writer.print("\t\t\t\t\t@as(?u32, if ({s}_) |_inner| _inner.getId() else null),\n", .{arg.name}),
             .object => try writer.print("\t\t\t\t\t{s}_.getId(),\n", .{arg.name}),

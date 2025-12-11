@@ -24,8 +24,6 @@ pub fn build(b: *std.Build) void {
     });
     server.addImport("core", core);
 
-    addProtocols(b, target, optimize, core);
-
     const client_test_exe = b.addTest(.{ .root_module = client });
     const server_test_exe = b.addTest(.{ .root_module = server });
     const run_client_test = b.addRunArtifact(client_test_exe);
@@ -33,6 +31,8 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests.");
     test_step.dependOn(&run_client_test.step);
     test_step.dependOn(&run_server_test.step);
+
+    addProtocols(b, target, optimize, core, test_step);
 }
 
 fn makeScanner(
@@ -61,6 +61,7 @@ fn addProtocols(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     core: *std.Build.Module,
+    test_step: *std.Build.Step,
 ) void {
     const core_dep = b.dependency("wayland", .{});
     const protocols_dep = b.dependency("wayland_protocols", .{});
@@ -82,6 +83,9 @@ fn addProtocols(
             .root_source_file = output_file,
         });
         mod.addImport("core", core);
+        const mod_test_exe = b.addTest(.{ .root_module = mod });
+        const run_mod_test = b.addRunArtifact(mod_test_exe);
+        test_step.dependOn(&run_mod_test.step);
     }
 }
 

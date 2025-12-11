@@ -1,9 +1,14 @@
 //! Utility functions and types for serializing and deserializing messages according to
 //! the Wayland wire protocol (see https://wayland.freedesktop.org/docs/html/ch04.html).
 
+const std = @import("std");
+const builtin = @import("builtin");
+const native_endian = builtin.target.cpu.arch.endian();
+const Fixed = @import("Fixed.zig");
+
 /// Two-word message header containing target object id, message opcode, and length in bytes,
 /// including the header.
-pub const Header = switch (@import("builtin").target.cpu.arch.endian()) {
+pub const Header = switch (native_endian) {
     .little => extern struct {
         object: u32,
         opcode: u16,
@@ -22,19 +27,32 @@ pub const String = struct {
     data: [:0]const u8,
     padded_len: usize,
 
+    /// Initialize a string and calculate its padded length for serialization.
     pub fn init(data: [:0]const u8) String {
         return .{
             .data = data,
             .padded_len = roundup4(data.len + 1),
         };
     }
+
+    /// Initialize an optional string and calculate its padded length for serialization.
+    /// Returns null if data is null.
+    /// This function serves the purpose of simplifying possible argument types
+    /// when working with optional arguments.
+    pub fn initNullable(data: ?[:0]const u8) ?String {
+        return if (data) |d| String{
+            .data = d,
+            .padded_len = roundup4(d.len + 1),
+        } else null;
+    }
 };
 
-/// A blob of data prefixed by its length
+/// A blob of data prefixed by its length.
 pub const Array = struct {
     data: []const u8,
     padded_len: usize,
 
+    /// Initialize an array and calculate its padded length for serialization.
     pub fn init(data: []const u8) Array {
         return .{
             .data = data,
@@ -50,6 +68,7 @@ pub const GenericNewId = struct {
     version: u32,
     new_id: u32,
 
+    /// Initialize a generic new id from the params that will be present in codegen.
     pub fn init(comptime T: type, version: T.Version, new_id: u32) GenericNewId {
         return .{
             .interface = .init(T.interface),
@@ -67,12 +86,11 @@ pub fn serializeArgs(
     args: anytype,
 ) u16 {
     const length = calculateArgsLength(args);
-    const head = Header{
+    std.mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]).* = .{
         .object = object,
         .opcode = opcode,
         .length = length,
     };
-    @memcpy(buffer[0..@sizeOf(Header)], std.mem.asBytes(&head));
 
     var index: usize = @sizeOf(Header);
     inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |f|
@@ -81,7 +99,8 @@ pub fn serializeArgs(
     return length;
 }
 
-pub fn deserializeEventType(
+/// Deserialize `bytes` and `fds` into a `T`.
+pub fn deserializeEvent(
     comptime T: type,
     bytes: []const u8,
     fds: []const std.posix.fd_t,
@@ -109,19 +128,14 @@ pub fn deserializeEventType(
     return event;
 }
 
-const std = @import("std");
-const Fixed = @import("Fixed.zig");
-
 fn calculateArgsLength(args: anytype) u16 {
     var length: u16 = 8;
-    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
-        switch (field.type) {
-            String, Array => length += @intCast(@field(args, field.name).padded_len + 4),
-            GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 12)),
-            ?String => length += if (@field(args, field.name) == null) 4 else @intCast(@field(args, field.name).?.padded_len + 4),
-            else => length += 4,
-        }
-    }
+    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| switch (field.type) {
+        String, Array => length += @intCast(@field(args, field.name).padded_len + 4),
+        GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 12)),
+        ?String => length += if (@field(args, field.name)) |s| @intCast(s.padded_len + 4) else 4,
+        else => length += 4,
+    };
     return length;
 }
 
@@ -191,47 +205,58 @@ fn serializeArray(buffer: []u8, array: Array) usize {
     return written + array.padded_len;
 }
 
+/// Deserialize a single arg of type `T` from `bytes` where `sig_byte` comes from the `_signature`
+/// from codegen and is used to disambiguate types.
 fn deserializeArg(comptime T: type, comptime sig_byte: u8, bytes: []const u8) struct { T, usize } {
     switch (@typeInfo(T)) {
+        // We have an int, which can only be an i32 or u32.
         .int => {
             comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u');
             const val = std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
             return .{ val, @sizeOf(T) };
         },
-        .@"struct" => switch (sig_byte) {
-            'f' => {
+        // We have a struct, which could either be a `Fixed`, or some packed struct(u32) from
+        // codegen representing a bitfield enum.
+        .@"struct" => {
+            comptime std.debug.assert(sig_byte == 'f' or sig_byte == 'u');
+            // fixed
+            if (sig_byte == 'f') {
                 const val = Fixed{ .data = std.mem.bytesToValue(i32, bytes[0..@sizeOf(i32)]) };
                 return .{ val, @sizeOf(i32) };
-            },
-            'u' => {
-                const val = @as(T, @bitCast(std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)])));
-                return .{ val, @sizeOf(u32) };
-            },
-            else => unreachable,
+            }
+            // bitfield
+            const val = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
+            return .{ @bitCast(val), @sizeOf(u32) };
         },
+        // We have an object or enum (not bitfield).
         .@"enum" => |e| {
             comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
             const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
             return .{ val, @sizeOf(e.tag_type) };
         },
+        // We have either a string or array.
         .pointer => |p| {
             const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
             if (p.sentinel_ptr != null) {
+                // Its a string
                 const val: [:0]const u8 = @ptrCast(bytes[4 .. len + 3]);
                 return .{ val, roundup4(len) + @sizeOf(u32) };
             } else {
+                // Its an array
                 const val: []const u8 = bytes[4 .. len + 4];
                 return .{ val, roundup4(len) + @sizeOf(u32) };
             }
         },
+        // We have either an optional string or optional object.
         .optional => |o| {
             switch (@typeInfo(o.child)) {
+                // Its an object
                 .@"enum" => |e| {
                     comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
-                    // TODO: handle new ids
                     const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
                     return .{ val, @sizeOf(e.tag_type) };
                 },
+                // Its a string
                 .pointer => |p| {
                     const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
                     if (p.sentinel_ptr != null) {

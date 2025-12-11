@@ -37,12 +37,14 @@ pub fn EventHandler(comptime protocol: type) type {
             self.proxies.deinit(gpa);
         }
 
+        pub const AddObjectError = error{OutOfMemory};
+
         /// Add an object to an unbounded event handler.
         /// NOTE: Must have been initialized with `initCapacity`,
         /// it is invalid to use this function with `initBuffered`
         /// `object` must be a wayland object created either by a factory interface
         /// or by an `IdAllocator`
-        pub fn addObject(self: *Self, gpa: Allocator, object: anytype) error{OutOfMemory}!void {
+        pub fn addObject(self: *Self, gpa: Allocator, object: anytype) AddObjectError!void {
             const proxy = Proxy{
                 .id = object.getId(),
                 .interface = @TypeOf(object).interface,
@@ -55,7 +57,7 @@ pub fn EventHandler(comptime protocol: type) type {
         /// but is completely valid to use with `initCapacity`
         /// `object` must be a wayland object created either by a factory interface
         /// or by an `IdAllocator`
-        pub fn addObjectBounded(self: *Self, object: anytype) error{OutOfMemory}!void {
+        pub fn addObjectBounded(self: *Self, object: anytype) AddObjectError!void {
             const proxy = Proxy{
                 .id = object.getId(),
                 .interface = @TypeOf(object).interface,
@@ -82,8 +84,6 @@ pub fn EventHandler(comptime protocol: type) type {
         pub fn addRawBounded(self: *Self, id: u32, interface: [:0]const u8) AddObjectError!void {
             try self.proxies.appendBounded(.{ .id = id, .interface = interface });
         }
-
-        pub const AddObjectError = error{OutOfMemory};
 
         /// Remove an object from the handler.
         /// `object` can be either a wayland object from a factory interface
@@ -114,7 +114,7 @@ pub fn EventHandler(comptime protocol: type) type {
             return self.nextEvent(connection, false);
         }
 
-        /// Wait for an event to be received
+        /// Wait indefinately for an event to be received.
         pub fn waitNextEvent(
             self: *const Self,
             connection: *Connection,
@@ -170,29 +170,49 @@ fn deserializeEvent(
     bytes: []const u8,
     conn: *Connection,
 ) Event {
+    // This is arbitrary, but works for now.
     @setEvalBranchQuota(10000);
+
     const ti = @typeInfo(Event).@"union";
     inline for (ti.fields) |field| if (std.mem.eql(u8, field.name, target_interface)) {
         const sub_fields = @typeInfo(field.type).@"union".fields;
+        // Since sub_fields cannot be indexed with a runtime value (header.opcode),
+        // this seems to be the best alternative.
         switch (header.opcode) {
             inline 0...sub_fields.len - 1 => |i| {
                 const sub_field = sub_fields[i];
 
+                // Get fds from connection
                 const fd_count = comptime countFds(sub_field.type);
                 var fds: [fd_count]std.posix.fd_t = undefined;
+                // FIXME: Is there good reason to handle the null case gracefully?
+                // What could that even look like this far in?
                 for (0..fd_count) |fd_index| fds[fd_index] = conn.reader.nextFd().?;
 
-                var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, &fds);
-                @field(data, std.meta.fields(@TypeOf(data))[0].name) = @enumFromInt(header.object);
+                // Deserialize the event packet and create an *Event struct
+                // (e.g. wayland.Display.DeleteIdEvent)
+                var event: sub_field.type = wire.deserializeEvent(sub_field.type, bytes, &fds);
 
-                const sub_ev = @unionInit(field.type, sub_field.name, data);
-                const ev = @unionInit(Event, field.name, sub_ev);
-                return ev;
+                // Since the target object is derived from the header,
+                // rather than the message signature, it is set after deserializing
+                const object_self_field = std.meta.fields(@TypeOf(event))[0];
+                @field(event, object_self_field.name) = @enumFromInt(header.object);
+
+                // Initialize the interface-level event struct (e.g. protocol.Event.wl_display)
+                const interface_event = @unionInit(field.type, sub_field.name, event);
+
+                // Initialize the top-level event (protocol.Event).
+                const global_event = @unionInit(Event, field.name, interface_event);
+
+                return global_event;
             },
             else => @panic("Invalid opcode."),
         }
     };
-    @panic("Invalid opcode");
+
+    // One of the proxies was created with an interface
+    // that doesn't exist in the given set of protocols
+    unreachable;
 }
 
 fn countFds(comptime T: type) usize {

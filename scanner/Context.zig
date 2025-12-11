@@ -55,6 +55,7 @@ pub fn writeClient(self: *const Context, gpa: Allocator, writer: *std.Io.Writer)
     try writer.writeAll("const Fixed = core.Fixed;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
     try writer.writeAll("const IdAllocator = core.IdAllocator;\n");
+    try writer.writeAll("test {\n\t@import(\"std\").testing.refAllDeclsRecursive(@This());\n}\n");
 }
 
 pub fn writeServer(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void {

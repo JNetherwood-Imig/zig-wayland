@@ -71,7 +71,7 @@ pub const ConnectInfo = union(enum) {
         buffers: *Buffers,
     ) ConnectError!Connection {
         const handle = conn: switch (self) {
-            .socket => |fd| fd: {
+            .sock => |fd| fd: {
                 // Slightly dirty (maybe temporary) code to confirm that fd is a valid fd
                 // and is a socket.
                 switch (posix.errno(std.os.linux.fcntl(fd, std.os.linux.F.GETFD, 0))) {
