@@ -33,11 +33,14 @@ pub fn allocator(self: *DynamicIdAllocator) IdAllocator {
 fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
     var self: *DynamicIdAllocator = @ptrCast(@alignCast(context));
     if (self.free_list.pop()) |id| return id;
+    if (self.next_id > max_id) return error.OutOfIds;
     defer self.next_id += 1;
     return self.next_id;
 }
 
 fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
+    if (id > max_id) @panic("Id is less than client max id. Are you trying to free a server id?");
+
     var self: *DynamicIdAllocator = @ptrCast(@alignCast(context));
     if (id == self.next_id - 1)
         self.next_id = id

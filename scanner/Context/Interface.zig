@@ -103,6 +103,7 @@ pub fn write(
     const type_name = map_entry.type_name;
 
     try writer.print("\tpub const {s} = enum(u32) {{\n", .{type_name});
+    try writer.writeAll("\t\tnull_handle = 0,\n");
     try writer.writeAll("\t\t_,\n");
     try writer.print("\t\tpub const interface = \"{s}\";\n", .{self.name});
     try writer.writeAll("\t\tpub const Version = enum(u32) {\n");
@@ -129,8 +130,10 @@ pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]c
     const stripped_name = name: {
         const name = if (std.mem.startsWith(u8, self.name, prefix))
             self.name[prefix.len..]
-        else
+        else {
+            log.err("Invalid prefix {s} for interface {s}.", .{ prefix, self.name });
             return error.InvalidPrefix;
+        };
 
         if (std.mem.lastIndexOfScalar(u8, name, '_')) |idx| {
             if (name.len > idx + 2 and
@@ -156,4 +159,5 @@ const Description = @import("Description.zig");
 const Request = @import("Request.zig");
 const Event = @import("Event.zig");
 const Enum = @import("Enum.zig");
+const log = std.log.scoped(.scanner);
 const Allocator = std.mem.Allocator;

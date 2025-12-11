@@ -29,7 +29,7 @@ fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
 }
 
 fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
-    if (id > max_id) @panic("Id is less than client max id. Are you trying to free a server id?");
+    if (id < min_id) @panic("Id is less than server min id. Are you trying to free a client id?");
 
     var self: *FixedBufferIdAllocator = @ptrCast(@alignCast(context));
     if (id == self.next_id - 1)
@@ -40,7 +40,8 @@ fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
 
 const std = @import("std");
 const core = @import("core");
-const min_id: u32 = 0x00000001;
-const max_id: u32 = 0xfeffffff;
-const Allocator = std.mem.Allocator;
+const min_id: u32 = 0xff000000;
+// Even though the protocol allows allocating 0xffffffff,
+// it causes problems with integer overflow, so we're just going to stop one short
+const max_id: u32 = 0xffffffff;
 const IdAllocator = core.IdAllocator;

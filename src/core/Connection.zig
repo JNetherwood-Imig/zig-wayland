@@ -1,8 +1,9 @@
 const Connection = @This();
 
 handle: std.posix.fd_t,
+ida: IdAllocator,
 
-pub fn connect(info: ConnectInfo) ConnectError!Connection {
+pub fn connect(info: ConnectInfo, ida: IdAllocator) ConnectError!Connection {
     const handle = conn: switch (info) {
         .socket => |fd| fd: {
             switch (posix.errno(std.os.linux.fcntl(fd, std.os.linux.F.GETFD, 0))) {
@@ -34,7 +35,7 @@ pub fn connect(info: ConnectInfo) ConnectError!Connection {
         .fallback => continue :conn .{ .name = "wayland-0" },
     };
 
-    return Connection{ .handle = handle };
+    return Connection{ .handle = handle, .ida = ida };
 }
 
 pub fn close(self: *Connection) void {
@@ -118,14 +119,16 @@ pub const ConnectInfo = union(enum) {
         }
     }
 
-    pub fn connect(self: ConnectInfo) ConnectError!Connection {
-        return Connection.connect(self);
+    pub fn connect(self: ConnectInfo, ida: IdAllocator) ConnectError!Connection {
+        return Connection.connect(self, ida);
     }
 };
 
 const std = @import("std");
 const util = @import("util");
 const wire = @import("wire.zig");
+const IdAllocator = @import("IdAllocator.zig");
+
 const posix = std.posix;
 const cmsg = util.cmsg;
 const Writer = std.Io.Writer;

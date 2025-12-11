@@ -224,7 +224,6 @@ fn deserializeArg(comptime T: type, comptime sig_byte: u8, bytes: []const u8) st
         },
         .@"enum" => |e| {
             comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
-            // TODO: handle new ids
             const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
             return .{ val, @sizeOf(e.tag_type) };
         },

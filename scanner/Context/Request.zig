@@ -132,7 +132,7 @@ fn writeNormal(
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
     try writer.writeAll("\t\t\t\t&message_buffer,\n");
-    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
         try writer.print(
@@ -140,7 +140,7 @@ fn writeNormal(
             .{fd_count},
         );
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }
         try writer.writeAll("\t\t\t});\n");
     } else {
@@ -173,12 +173,11 @@ fn writeConstructor(
     try writer.print("\t\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\t\tconnection: *Connection,\n");
-    try writer.writeAll("\t\t\tida: IdAllocator,\n");
     for (self.args.items) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
     try writer.print("\t\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
-    try writer.print("\t\t\tconst {s} = try ida.alloc();\n", .{return_arg.name});
+    try writer.print("\t\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
     try writer.print(
         "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
@@ -188,7 +187,7 @@ fn writeConstructor(
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
     try writer.writeAll("\t\t\t\t&message_buffer,\n");
-    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
         try writer.print(
@@ -196,13 +195,13 @@ fn writeConstructor(
             .{fd_count},
         );
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }
         try writer.writeAll("\t\t\t});\n");
     } else {
         try writer.writeAll("\t\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
-    try writer.print("\t\t\treturn @enumFromInt({s});\n", .{return_arg.name});
+    try writer.print("\t\t\treturn @enumFromInt({s}_);\n", .{return_arg.name});
     try writer.writeAll("\t\t}\n");
 }
 
@@ -224,13 +223,12 @@ fn writeAnyConstructor(
     try writer.print("\t\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\t\tconnection: *Connection,\n");
-    try writer.writeAll("\t\t\tida: IdAllocator,\n");
     try writer.writeAll("\t\t\tcomptime T: type,\n");
     try writer.writeAll("\t\t\tversion: T.Version,\n");
     for (self.args.items) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
     try writer.writeAll("\t\t) !T {\n");
-    try writer.writeAll("\t\t\tconst new_id = try ida.alloc();\n");
+    try writer.writeAll("\t\t\tconst new_id = try connection.ida.alloc();\n");
     try writer.print(
         "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
@@ -243,7 +241,7 @@ fn writeAnyConstructor(
     for (self.args.items) |arg| switch (arg.type) {
         .fd => {},
         .any_new_id => try writer.writeAll("\t\t\t\t.init(T, version, new_id),\n"),
-        else => try writer.print("\t\t\t\t{s},\n", .{arg.name}),
+        else => try writer.print("\t\t\t\t{s}_,\n", .{arg.name}),
     };
     try writer.writeAll("\t\t\t);\n");
     if (fd_count > 0) {
@@ -252,7 +250,7 @@ fn writeAnyConstructor(
             .{fd_count},
         );
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         }
         try writer.writeAll("\t\t\t});\n");
     } else {
@@ -286,10 +284,11 @@ fn writeSerialize(
         try writer.writeAll("\t\t\t\t.{\n");
         for (self.args.items) |arg| switch (arg.type) {
             .fd => {},
-            .string, .optional_string => try writer.print("\t\t\t\t\tcore.wire.String.init({s}),\n", .{arg.name}),
-            .optional_object => try writer.print("\t\t\t\t\t@as(?u32, if ({s}) |_inner| _inner.getId() else null),\n", .{arg.name}),
-            .object => try writer.print("\t\t\t\t\t{s}.getId(),\n", .{arg.name}),
-            else => try writer.print("\t\t\t\t\t{s},\n", .{arg.name}),
+            .string, .optional_string => try writer.print("\t\t\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
+            .array => try writer.print("\t\t\t\t\tcore.wire.Array.init({s}_),\n", .{arg.name}),
+            .optional_object => try writer.print("\t\t\t\t\t@as(?u32, if ({s}_) |_inner| _inner.getId() else null),\n", .{arg.name}),
+            .object => try writer.print("\t\t\t\t\t{s}_.getId(),\n", .{arg.name}),
+            else => try writer.print("\t\t\t\t\t{s}_,\n", .{arg.name}),
         };
         try writer.writeAll("\t\t\t\t},\n");
     } else try writer.writeAll("\t\t\t\t.{},\n");

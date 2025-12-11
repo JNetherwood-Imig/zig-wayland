@@ -67,7 +67,10 @@ pub fn main() !void {
         var file_writer = output_file.writer(&output_buffer);
         const writer = &file_writer.interface;
 
-        try context.write(gpa, writer);
+        try switch (mode) {
+            .client => context.writeClient(gpa, writer),
+            .server => context.writeServer(gpa, writer),
+        };
         try writer.flush();
     }
 }

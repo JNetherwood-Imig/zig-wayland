@@ -22,7 +22,7 @@ pub inline fn alloc(self: IdAllocator) AllocError!u32 {
     return self.vtable.alloc(self.context);
 }
 
-pub inline fn create(self: IdAllocator, comptime T: type) AllocError!T {
+pub inline fn createObject(self: IdAllocator, comptime T: type) AllocError!T {
     return @enumFromInt(try self.alloc());
 }
 

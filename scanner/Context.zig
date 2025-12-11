@@ -44,7 +44,7 @@ pub fn genInterfaceMap(self: *Context, gpa: Allocator) !void {
     }
 }
 
-pub fn write(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void {
+pub fn writeClient(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void {
     for (self.protocols.items) |protocol|
         try protocol.write(gpa, writer, &self.interface_map);
 
@@ -55,6 +55,12 @@ pub fn write(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void
     try writer.writeAll("const Fixed = core.Fixed;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
     try writer.writeAll("const IdAllocator = core.IdAllocator;\n");
+}
+
+pub fn writeServer(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void {
+    _ = self;
+    _ = gpa;
+    _ = writer;
 }
 
 const std = @import("std");

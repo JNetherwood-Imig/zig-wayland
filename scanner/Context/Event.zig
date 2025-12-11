@@ -110,7 +110,11 @@ pub fn write(
             const entry = try map.get(ifce);
             try writer.print("\t\t\t{s}: {s}.{s},\n", .{ arg.name, entry.protocol, entry.type_name });
         },
-        else => try arg.write(gpa, writer, map),
+        else => {
+            try writer.print("\t\t\t{s}: ", .{arg.name});
+            try arg.writeTypeString(gpa, writer, map);
+        },
+        // else => try arg.write(gpa, writer, map),
     };
     try writer.writeAll("\t\t};\n");
 }

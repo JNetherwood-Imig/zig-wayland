@@ -118,11 +118,11 @@ pub fn deinit(self: *Arg, gpa: Allocator) void {
 }
 
 pub fn write(self: *const Arg, gpa: Allocator, writer: *std.Io.Writer, map: *const InterfaceMap) !void {
-    try writer.print("\t\t\t{s}: ", .{self.name});
+    try writer.print("\t\t\t{s}_: ", .{self.name});
     try self.writeTypeString(gpa, writer, map);
 }
 
-fn writeTypeString(
+pub fn writeTypeString(
     self: *const Arg,
     gpa: Allocator,
     writer: *std.Io.Writer,
