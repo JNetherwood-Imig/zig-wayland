@@ -49,11 +49,6 @@ pub fn RingBuffer(comptime T: type) type {
             return len;
         }
 
-        pub fn peek(self: *const Self) ?T {
-            if (self.start == self.end) return null;
-            return self.buffer[self.start];
-        }
-
         pub fn take(self: *Self) ?T {
             if (self.start == self.end) return null;
             defer self.start = (self.start + 1) % self.buffer.len;
@@ -77,13 +72,14 @@ pub fn RingBuffer(comptime T: type) type {
             return len;
         }
 
-        pub fn toIovecConst(self: *Self) [2]std.posix.iovec_const {
-            var iov = std.mem.zeroes([2]std.posix.iovec_const);
+        pub fn getIovecConst(self: *Self, iov: *[2]std.posix.iovec_const) usize {
+            defer self.reset();
             if (self.start <= self.end) {
                 iov[0] = .{
                     .base = @ptrCast(self.buffer.ptr + self.start),
                     .len = self.used() * @sizeOf(T),
                 };
+                return 1;
             } else {
                 iov[0] = .{
                     .base = @ptrCast(self.buffer.ptr + self.start),
@@ -93,9 +89,8 @@ pub fn RingBuffer(comptime T: type) type {
                     .base = @ptrCast(self.buffer.ptr),
                     .len = self.end * @sizeOf(T),
                 };
+                return 2;
             }
-            self.reset();
-            return iov;
         }
     };
 }

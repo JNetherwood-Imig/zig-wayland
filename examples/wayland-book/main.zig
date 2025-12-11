@@ -1,5 +1,6 @@
 const std = @import("std");
 const zwl = @import("zwl");
+const EventHandler = zwl.EventHandler(zwl.protocol);
 const wl = zwl.protocol.wayland;
 const xdg = zwl.protocol.xdg_shell;
 const shm_util = @import("shm.zig");
@@ -30,8 +31,8 @@ pub fn main() !void {
     var buffers = zwl.Connection.Buffers{};
 
     conn = try zwl.getConnectInfo().connect(ida, &buffers);
-    var proxy_buf: [16]zwl.EventHandler.Proxy = undefined;
-    var handler = zwl.EventHandler.initBuffered(&proxy_buf);
+    var proxy_buf: [16]EventHandler.Proxy = undefined;
+    var handler = EventHandler.initBuffered(&proxy_buf);
 
     disp = try ida.createObject(wl.Display);
     try handler.addObjectBounded(disp);

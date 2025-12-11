@@ -2,8 +2,7 @@ pub const DynamicIdAllocator = @import("client/DynamicIdAllocator.zig");
 pub const FixedBufferIdAllocator = @import("client/FixedBufferIdAllocator.zig");
 pub const IdAllocator = core.IdAllocator;
 
-pub const EventHandlerCustomProtocols = event_handler.EventHandlerCustomProtocols;
-pub const EventHandler = EventHandlerCustomProtocols(protocol);
+pub const EventHandler = event_handler.EventHandler;
 
 pub const Connection = core.Connection;
 

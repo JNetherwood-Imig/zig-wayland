@@ -72,6 +72,17 @@ pub fn sendMessageWithFds(
     try self.writer.writeData(buffer);
 }
 
+pub fn pollEvents(self: *Connection, wait: bool) !bool {
+    var pfd = posix.pollfd{
+        .fd = self.handle,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    };
+    if (try posix.poll((&pfd)[0..1], if (wait) -1 else 0) == 0) return false;
+    try self.reader.readIncoming();
+    return true;
+}
+
 pub const ConnectError = error{
     InvalidWaylandSocket,
     NoXdgRuntimeDir,

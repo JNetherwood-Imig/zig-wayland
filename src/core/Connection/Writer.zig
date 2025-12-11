@@ -37,7 +37,9 @@ pub fn writeFds(self: *Writer, fds: []const posix.fd_t) !void {
 }
 
 pub fn flush(self: *Writer) !void {
-    const iov = self.data.toIovecConst();
+    if (self.data.used() == 0) return;
+    var iov: [2]posix.iovec_const = undefined;
+    const iovlen = self.data.getIovecConst(&iov);
 
     var control: [cmsg.space(20)]u8 align(8) = @splat(0);
     const cmsg_ptr: *cmsg.Header = @ptrCast(&control);
@@ -51,11 +53,16 @@ pub fn flush(self: *Writer) !void {
         .name = null,
         .namelen = 0,
         .iov = &iov,
-        .iovlen = iov.len,
+        .iovlen = iovlen,
         .control = if (count > 0) &control else null,
         .controllen = if (count > 0) cmsg_ptr.len else 0,
         .flags = 0,
     };
 
-    _ = try posix.sendmsg(self.socket, &msg, 0);
+    const sent = try posix.sendmsg(self.socket, &msg, 0);
+    std.log.debug("Wrote {d} bytes to server.", .{sent});
+
+    var expected: usize = 0;
+    for (0..iovlen) |i| expected += iov[i].len;
+    std.debug.assert(sent == expected);
 }

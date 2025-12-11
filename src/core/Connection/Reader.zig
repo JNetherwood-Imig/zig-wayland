@@ -31,7 +31,8 @@ pub fn readIncoming(self: *Reader) !void {
         .controllen = control.len,
         .flags = 0,
     };
-    const read = try recvmsg(self.socket, &msg, posix.MSG.DONTWAIT);
+    const read = try recvmsg(self.socket, &msg, 0);
+    std.log.debug("Read {d} bytes from server.", .{read});
     std.debug.assert(self.data.putMany(buf[0..read]) == read);
     var header = cmsg.firstHeader(&msg);
     while (header) |h| {
@@ -43,7 +44,7 @@ pub fn readIncoming(self: *Reader) !void {
 }
 
 pub fn nextHeader(self: *Reader) ?wire.Header {
-    if (self.data.available() < @sizeOf(wire.Header)) return null;
+    if (self.data.used() < @sizeOf(wire.Header)) return null;
     var buf: [@sizeOf(wire.Header)]u8 = undefined;
     std.debug.assert(self.data.takeMany(&buf) == buf.len);
     return std.mem.bytesToValue(wire.Header, &buf);

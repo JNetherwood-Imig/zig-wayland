@@ -1,7 +1,7 @@
-pub const EventHandler = EventHandlerCustomProtocols(@import("client_protocol"));
-
-pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
+pub fn EventHandler(comptime protocol: type) type {
     return struct {
+        const Self = @This();
+
         proxies: std.ArrayList(Proxy),
 
         pub const Proxy = struct {
@@ -9,19 +9,19 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             interface: [:0]const u8,
         };
 
-        pub fn initCapacity(gpa: Allocator, initial_capacity: usize) !EventHandler {
+        pub fn initCapacity(gpa: Allocator, initial_capacity: usize) !Self {
             return .{ .proxies = try .initCapacity(gpa, initial_capacity) };
         }
 
-        pub fn initBuffered(buffer: []Proxy) EventHandler {
+        pub fn initBuffered(buffer: []Proxy) Self {
             return .{ .proxies = .initBuffer(buffer) };
         }
 
-        pub fn deinit(self: *EventHandler, gpa: Allocator) void {
+        pub fn deinit(self: *Self, gpa: Allocator) void {
             self.proxies.deinit(gpa);
         }
 
-        pub fn addObject(self: *EventHandler, gpa: Allocator, object: anytype) !void {
+        pub fn addObject(self: *Self, gpa: Allocator, object: anytype) !void {
             const proxy = Proxy{
                 .id = object.getId(),
                 .interface = @TypeOf(object).interface,
@@ -29,7 +29,7 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             try self.proxies.append(gpa, proxy);
         }
 
-        pub fn addObjectBounded(self: *EventHandler, object: anytype) !void {
+        pub fn addObjectBounded(self: *Self, object: anytype) !void {
             const proxy = Proxy{
                 .id = object.getId(),
                 .interface = @TypeOf(object).interface,
@@ -37,7 +37,7 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             try self.proxies.appendBounded(proxy);
         }
 
-        pub fn delObject(self: *EventHandler, object: anytype) void {
+        pub fn delObject(self: *Self, object: anytype) void {
             const id = switch (@typeInfo(@TypeOf(object))) {
                 .int => object,
                 .@"enum" => object.getId(),
@@ -52,52 +52,35 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             }
         }
 
-        pub fn getNextEvent(self: *const EventHandler, connection: *Connection) !?protocol.Event {
-            return self.waitNextEventTimeout(connection, 0);
+        pub fn getNextEvent(self: *const Self, connection: *Connection) !?protocol.Event {
+            return self.nextEvent(connection, false);
         }
 
-        pub fn waitNextEvent(self: *const EventHandler, connection: *Connection) !protocol.Event {
+        pub fn waitNextEvent(self: *const Self, connection: *Connection) !protocol.Event {
             while (true) {
-                if (try self.waitNextEventTimeout(connection, -1)) |ev| return ev;
+                if (try self.nextEvent(connection, true)) |ev| return ev;
             }
         }
 
-        pub fn waitNextEventTimeout(
-            self: *const EventHandler,
-            connection: *Connection,
-            timeout: i32,
-        ) !?protocol.Event {
+        fn nextEvent(self: *const Self, conn: *Connection, wait: bool) !?protocol.Event {
+            conn.writer.flush() catch |e| switch (e) {
+                error.BrokenPipe => {},
+                else => return e,
+            };
+
             while (true) {
-                connection.writer.flush() catch |e| switch (e) {
-                    error.BrokenPipe => {},
-                    else => return e,
+                const header = conn.reader.nextHeader() orelse {
+                    if (!try conn.pollEvents(wait)) return null;
+                    continue;
                 };
-
-                var pfds = [1]std.posix.pollfd{.{
-                    .fd = connection.handle,
-                    .events = std.posix.POLL.IN,
-                    .revents = 0,
-                }};
-                if (try std.posix.poll(&pfds, timeout) == 0) return null;
-
-                try connection.reader.readIncoming();
-                const header = while (true) {
-                    if (connection.reader.nextHeader()) |h| break h;
-                    std.debug.print("Incomplete header.\n", .{});
-                    try connection.reader.readIncoming();
-                };
+                std.log.debug("Received event {any}.", .{header});
                 var buf: [4096]u8 = undefined;
-                var bytes_read: usize = 0;
-                while (bytes_read < header.length - 8) {
-                    bytes_read += connection.reader.getData(buf[0 .. header.length - 8][bytes_read..]);
-                    try connection.reader.readIncoming();
-                }
-
+                std.debug.assert(conn.reader.getData(buf[0 .. header.length - 8]) == header.length - 8);
                 for (self.proxies.items) |proxy| {
                     if (proxy.id == header.object) {
                         return deserializeEvent(header, proxy.interface, buf[0 .. header.length - 8], &.{});
                     }
-                } else continue;
+                }
             }
         }
 
