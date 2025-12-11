@@ -11,7 +11,6 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .root_source_file = b.path("wayland_book.zig"),
-            .link_libc = true,
         }),
     });
     wayland_book.root_module.addImport("zwl", zwl);
