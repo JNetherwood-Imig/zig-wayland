@@ -129,8 +129,9 @@ fn calculateArgsLength(args: anytype) u16 {
     var length: u16 = 8;
     inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
         switch (field.type) {
-            String, Array => length += @field(args, field.name).padded_len,
+            String, Array => length += @intCast(@field(args, field.name).padded_len + 4),
             GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 12)),
+            ?String => length += if (@field(args, field.name) == null) 4 else @intCast(@field(args, field.name).?.padded_len + 4),
             else => length += 4,
         }
     }
@@ -151,6 +152,11 @@ fn serializeArg(buffer: []u8, arg: anytype) usize {
             GenericNewId => serializeGenericNewId(buffer, arg),
             Fixed => serializeFixed(buffer, arg),
             else => @compileError("Unexpected struct arg type."),
+        },
+        .@"enum" => |e| switch (e.tag_type) {
+            i32 => serializeInt(buffer, @intFromEnum(arg)),
+            u32 => serializeUint(buffer, @intFromEnum(arg)),
+            else => @compileError("Unexpected enum tag type."),
         },
         .optional => |o| switch (o.child) {
             u32 => serializeUint(buffer, arg),

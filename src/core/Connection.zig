@@ -115,7 +115,6 @@ pub const ConnectInfo = union(enum) {
 const std = @import("std");
 const util = @import("util");
 const wire = @import("wire.zig");
-const log = std.log.scoped(.wayland_client);
 const posix = std.posix;
 const cmsg = util.cmsg;
 const Writer = std.Io.Writer;

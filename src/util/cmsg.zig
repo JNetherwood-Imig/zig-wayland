@@ -9,7 +9,9 @@ pub fn MsgUnion(comptime count: usize) type {
         buffer: [space(count)]u8,
 
         pub fn init() @This() {
-            return .{ .header = .{ .cmsg_len = length(count) } };
+            var self = std.mem.zeroes(@This());
+            self.header = .{ .cmsg_len = length(count) };
+            return self;
         }
     };
 }

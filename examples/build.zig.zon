@@ -1,0 +1,16 @@
+.{
+    .name = .wayland_examples,
+    .fingerprint = 0x3fd1744a27227c60,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+
+    .paths = .{
+        "wayland_book.zig",
+        "build.zig",
+        "build.zig.zon",
+    },
+
+    .dependencies = .{
+        .wayland = .{ .path = ".." },
+    },
+}

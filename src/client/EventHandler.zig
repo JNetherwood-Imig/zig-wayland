@@ -64,7 +64,7 @@ pub fn waitNextEventTimeout(
             .controllen = cmsg.length(20),
             .flags = 0,
         };
-        _ = std.os.linux.recvmsg(connection.handle, &msg, 0);
+        if (std.os.linux.recvmsg(connection.handle, &msg, 0) <= 0) return error.ReadFailed;
 
         var read: usize = 0;
 

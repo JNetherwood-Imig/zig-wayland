@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     const client_protocol = makeProtoocl("client", b, target, optimize, scanner, util, core);
     const server_protocol = makeProtoocl("server", b, target, optimize, scanner, util, core);
 
-    const client = b.createModule(.{
+    const client = b.addModule("client", .{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/client.zig"),
@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     client.addImport("core", core);
     client.addImport("protocol", client_protocol);
 
-    const server = b.createModule(.{
+    const server = b.addModule("server", .{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/server.zig"),
@@ -54,20 +54,6 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests.");
     test_step.dependOn(&run_client_test.step);
     test_step.dependOn(&run_server_test.step);
-
-    const wayland_book = b.addExecutable(.{
-        .name = "wayland-book",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("examples/wayland_book.zig"),
-        }),
-    });
-    wayland_book.root_module.addImport("zwl", client);
-    b.installArtifact(wayland_book);
-    const run_wayland_book = b.addRunArtifact(wayland_book);
-    const run_wayland_book_step = b.step("run-wayland-book", "Run wayland-book example.");
-    run_wayland_book_step.dependOn(&run_wayland_book.step);
 }
 
 fn makeScanner(
