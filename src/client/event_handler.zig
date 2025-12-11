@@ -52,13 +52,13 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             }
         }
 
-        pub fn getNextEvent(self: *const EventHandler, connection: *Connection, buf: []u8) !?protocol.Event {
-            return self.waitNextEventTimeout(connection, 0, buf);
+        pub fn getNextEvent(self: *const EventHandler, connection: *Connection) !?protocol.Event {
+            return self.waitNextEventTimeout(connection, 0);
         }
 
-        pub fn waitNextEvent(self: *const EventHandler, connection: *Connection, buf: []u8) !protocol.Event {
+        pub fn waitNextEvent(self: *const EventHandler, connection: *Connection) !protocol.Event {
             while (true) {
-                if (try self.waitNextEventTimeout(connection, -1, buf)) |ev| return ev;
+                if (try self.waitNextEventTimeout(connection, -1)) |ev| return ev;
             }
         }
 
@@ -66,55 +66,78 @@ pub fn EventHandlerCustomProtocols(comptime protocol: type) type {
             self: *const EventHandler,
             connection: *Connection,
             timeout: i32,
-            buf: []u8,
         ) !?protocol.Event {
-            _ = timeout;
-            try connection.writer.flush();
             while (true) {
-                var header: wire.Header = undefined;
-                var iov = [1]std.posix.iovec{.{ .base = @ptrCast(&header), .len = @sizeOf(wire.Header) }};
-                var control: [cmsg.space(20)]u8 = @splat(0);
-                var msg = std.posix.msghdr{
-                    .name = null,
-                    .namelen = 0,
-                    .iov = &iov,
-                    .iovlen = 1,
-                    .control = &control,
-                    .controllen = cmsg.length(20),
-                    .flags = 0,
+                connection.writer.flush() catch |e| switch (e) {
+                    error.BrokenPipe => {},
+                    else => return e,
                 };
-                if (std.os.linux.recvmsg(connection.handle, &msg, 0) <= 0) return error.ReadFailed;
 
-                var read: usize = 0;
+                var pfds = [1]std.posix.pollfd{.{
+                    .fd = connection.handle,
+                    .events = std.posix.POLL.IN,
+                    .revents = 0,
+                }};
+                if (try std.posix.poll(&pfds, timeout) == 0) return null;
 
-                while (read < header.length - 8) {
-                    read += try std.posix.read(connection.handle, buf[read .. header.length - 8]);
+                try connection.reader.readIncoming();
+                const header = while (true) {
+                    if (connection.reader.nextHeader()) |h| break h;
+                    std.debug.print("Incomplete header.\n", .{});
+                    try connection.reader.readIncoming();
+                };
+                var buf: [4096]u8 = undefined;
+                var bytes_read: usize = 0;
+                while (bytes_read < header.length - 8) {
+                    bytes_read += connection.reader.getData(buf[0 .. header.length - 8][bytes_read..]);
+                    try connection.reader.readIncoming();
                 }
 
                 for (self.proxies.items) |proxy| {
                     if (proxy.id == header.object) {
-                        return deserializeEvent(header, proxy.interface, buf[0 .. header.length - 8], &msg);
+                        return deserializeEvent(header, proxy.interface, buf[0 .. header.length - 8], &.{});
                     }
                 } else continue;
             }
         }
+
+        fn countFds(comptime T: type) usize {
+            var count: usize = 0;
+            for (T._signature) |byte| {
+                if (byte == 'f') count += 1;
+            }
+            return count;
+        }
+
         fn deserializeEvent(
             header: wire.Header,
             target_interface: [:0]const u8,
             bytes: []const u8,
-            msg: *const std.posix.msghdr,
+            fds: []const std.posix.fd_t,
         ) protocol.Event {
             inline for (@typeInfo(protocol.Event).@"union".fields) |field| {
                 if (std.mem.eql(u8, field.name, target_interface)) {
-                    inline for (@typeInfo(field.type).@"union".fields, 0..) |sub_field, i| {
-                        if (i == header.opcode) {
-                            var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, msg);
+                    const sub_fields = @typeInfo(field.type).@"union".fields;
+                    switch (header.opcode) {
+                        inline 0...sub_fields.len - 1 => |i| {
+                            const sub_field = sub_fields[i];
+                            var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, fds);
                             @field(data, std.meta.fields(@TypeOf(data))[0].name) = @enumFromInt(header.object);
                             const sub_ev = @unionInit(field.type, sub_field.name, data);
                             const ev = @unionInit(protocol.Event, field.name, sub_ev);
                             return ev;
-                        }
+                        },
+                        else => @panic("Invalid opcode."),
                     }
+                    // inline for (@typeInfo(field.type).@"union".fields, 0..) |sub_field, i| {
+                    //     if (i == header.opcode) {
+                    //         var data: sub_field.type = wire.deserializeEventType(sub_field.type, bytes, fds);
+                    //         @field(data, std.meta.fields(@TypeOf(data))[0].name) = @enumFromInt(header.object);
+                    //         const sub_ev = @unionInit(field.type, sub_field.name, data);
+                    //         const ev = @unionInit(protocol.Event, field.name, sub_ev);
+                    //         return ev;
+                    //     }
+                    // }
                 }
             }
             @panic("Invalid opcode");

@@ -37,7 +37,7 @@ pub fn writeFds(self: *Writer, fds: []const posix.fd_t) !void {
 }
 
 pub fn flush(self: *Writer) !void {
-    const iov = self.data.toIovec();
+    const iov = self.data.toIovecConst();
 
     var control: [cmsg.space(20)]u8 align(8) = @splat(0);
     const cmsg_ptr: *cmsg.Header = @ptrCast(&control);

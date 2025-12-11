@@ -3,14 +3,14 @@ const std = @import("std");
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         buffer: []T,
-        start: usize,
-        end: usize,
+        start: usize = 0,
+        end: usize = 0,
 
         const Self = @This();
 
         pub fn init(buffer: []T) Self {
             std.debug.assert(buffer.len > 0);
-            return .{ .buffer = buffer, .start = 0, .end = 0 };
+            return .{ .buffer = buffer };
         }
 
         pub fn reset(self: *Self) void {
@@ -77,7 +77,7 @@ pub fn RingBuffer(comptime T: type) type {
             return len;
         }
 
-        pub fn toIovec(self: *Self) [2]std.posix.iovec_const {
+        pub fn toIovecConst(self: *Self) [2]std.posix.iovec_const {
             var iov = std.mem.zeroes([2]std.posix.iovec_const);
             if (self.start <= self.end) {
                 iov[0] = .{
@@ -158,7 +158,7 @@ test "take all" {
     try std.testing.expectEqual(0, rb.end);
 }
 
-test "to iovec" {
+test "to iovec const" {
     var buf: [10]i32 = undefined;
     var rb: RingBuffer(i32) = .init(&buf);
     const items = [_]i32{ 0, 1, 2, 3, 4, 5, 6 };
@@ -169,7 +169,7 @@ test "to iovec" {
     try std.testing.expectEqual(2, rb.take());
     _ = rb.putMany(&items);
 
-    const iovs = rb.toIovec();
+    const iovs = rb.toIovecConst();
     try std.testing.expectEqual(7 * @sizeOf(i32), iovs[0].len);
     try std.testing.expectEqual(2 * @sizeOf(i32), iovs[1].len);
 }

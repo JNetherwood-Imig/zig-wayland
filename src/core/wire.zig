@@ -1,18 +1,13 @@
-const cmsg = @import("cmsg.zig");
-
-/// Wayland wire message header
 pub const Header = extern struct {
     object: u32,
     opcode: u16,
     length: u16,
 };
 
-/// Wayland wire string representation, which is null-terminated and padded to 32 bits
 pub const String = struct {
     padded_len: usize,
     data: [:0]const u8,
 
-    /// Init wayland string from null-terminated byte slice
     pub fn init(data: ?[:0]const u8) ?String {
         return if (data) |d| String{
             .padded_len = roundup4(d.len + 1),
@@ -21,12 +16,10 @@ pub const String = struct {
     }
 };
 
-/// Wayland wire array representation, which is padded to 32 bits
 pub const Array = struct {
     padded_len: usize,
     data: []const u8,
 
-    /// Init wayland array from byte slice
     pub fn init(data: []const u8) Array {
         return Array{
             .padded_len = roundup4(data.len),
@@ -35,7 +28,6 @@ pub const Array = struct {
     }
 };
 
-/// Wayland wire new id with an interface that cannot be inferred from the xml
 pub const GenericNewId = struct {
     interface: String,
     version: u32,
@@ -79,31 +71,13 @@ pub fn serializeArgs(
 pub fn deserializeEventType(
     comptime T: type,
     bytes: []const u8,
-    msg: *const std.posix.msghdr,
+    fds: []const std.posix.fd_t,
 ) T {
     const signature = T._signature;
-
-    const fd_count = comptime blk: {
-        var count: usize = 0;
-        for (signature) |byte| {
-            if (byte == 'd') count += 1;
-        }
-        break :blk count;
-    };
-
-    var fds: [fd_count]i32 = undefined;
-    var fd_index: usize = 0;
-    var hdr = cmsg.firstHeader(msg);
-    while (hdr) |h| {
-        const data = std.mem.bytesAsSlice(i32, cmsg.dataConst(h));
-        @memcpy(&fds, data);
-        fd_index += data.len;
-        hdr = cmsg.nextHeader(msg, h);
-    }
-
     var event: T = undefined;
     var index: usize = 0;
-    fd_index = 0;
+    var fd_index: usize = 0;
+
     switch (@typeInfo(T)) {
         .@"struct" => |s| inline for (s.fields[1..], 0..) |field, sig_index| {
             const sig_byte = signature[sig_index];

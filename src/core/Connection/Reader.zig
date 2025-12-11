@@ -13,46 +13,48 @@ fds: RingBuffer(posix.fd_t),
 pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Reader {
     return .{
         .socket = socket,
-        .data = .{ .buffer = data_buf },
-        .fds = .{ .buffer = fd_buf },
+        .data = .init(data_buf),
+        .fds = .init(fd_buf),
     };
 }
 
 pub fn readIncoming(self: *Reader) !void {
     var buf: [4096]u8 = undefined;
     var iov = [1]posix.iovec{.{ .base = &buf, .len = buf.len }};
-
     var control: [cmsg.space(20)]u8 align(8) = @splat(0);
-
     var msg = posix.msghdr{
         .name = null,
         .namelen = 0,
         .iov = &iov,
-        .iovlen = 1,
+        .iovlen = iov.len,
         .control = &control,
         .controllen = control.len,
         .flags = 0,
     };
-
-    const bytes_received = recvmsg(self.socket, &msg, posix.MSG.DONTWAIT);
+    const read = try recvmsg(self.socket, &msg, posix.MSG.DONTWAIT);
+    std.debug.assert(self.data.putMany(buf[0..read]) == read);
+    var header = cmsg.firstHeader(&msg);
+    while (header) |h| {
+        const data = cmsg.dataConst(h);
+        const fds = std.mem.bytesAsSlice(posix.fd_t, data);
+        if (self.fds.putMany(@alignCast(fds)) != fds.len) return error.OutOfSpace;
+        header = cmsg.nextHeader(&msg, h);
+    }
 }
 
 pub fn nextHeader(self: *Reader) ?wire.Header {
-    return if (self.data.read(@sizeOf(wire.Header))) |bytes|
-        std.mem.bytesToValue(wire.Header, bytes)
-    else
-        null;
+    if (self.data.available() < @sizeOf(wire.Header)) return null;
+    var buf: [@sizeOf(wire.Header)]u8 = undefined;
+    std.debug.assert(self.data.takeMany(&buf) == buf.len);
+    return std.mem.bytesToValue(wire.Header, &buf);
 }
 
 pub fn nextFd(self: *Reader) ?posix.fd_t {
-    return if (self.fds.read(@sizeOf(posix.fd_t))) |bytes|
-        std.mem.bytesToValue(posix.fd_t, bytes)
-    else
-        null;
+    return self.fds.take();
 }
 
-pub fn getData(self: *Reader, len: usize) ?[]const u8 {
-    return self.data.read(len);
+pub fn getData(self: *Reader, buf: []u8) usize {
+    return self.data.takeMany(buf);
 }
 
 // FIX

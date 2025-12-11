@@ -27,12 +27,9 @@ pub fn main() !void {
     var ida_state = zwl.FixedBufferIdAllocator.init(&id_buf);
     const ida = ida_state.allocator();
 
-    var read_buf: [4096]u8 = undefined;
-    var write_buf: [4096]u8 = undefined;
-    var fd_read_buf: [20]i32 = undefined;
-    var fd_write_buf: [20]i32 = undefined;
+    var buffers = zwl.Connection.Buffers{};
 
-    conn = try zwl.getConnectInfo().connect(ida, &read_buf, &write_buf, &fd_read_buf, &fd_write_buf);
+    conn = try zwl.getConnectInfo().connect(ida, &buffers);
     var proxy_buf: [16]zwl.EventHandler.Proxy = undefined;
     var handler = zwl.EventHandler.initBuffered(&proxy_buf);
 
@@ -44,8 +41,7 @@ pub fn main() !void {
     const sync_cb = try disp.sync(&conn);
     try handler.addObjectBounded(sync_cb);
 
-    var ev_buf: [4096]u8 = undefined;
-    while (handler.waitNextEvent(&conn, &ev_buf)) |event| switch (event) {
+    while (handler.waitNextEvent(&conn)) |event| switch (event) {
         .wl_callback => break,
         .wl_registry => |ev| switch (ev) {
             .global => |g| {
@@ -73,7 +69,7 @@ pub fn main() !void {
 
     try surf.commit(&conn);
 
-    while (handler.waitNextEvent(&conn, &ev_buf)) |event| switch (event) {
+    while (handler.waitNextEvent(&conn)) |event| switch (event) {
         .xdg_wm_base => |ev| try wm_base.pong(&conn, ev.ping.serial),
         .xdg_surface => |ev| {
             try ev.configure.xdg_surface.ackConfigure(&conn, ev.configure.serial);
