@@ -1,13 +1,7 @@
 .{
-    .name = .zig_wayland,
-    .fingerprint = 0x791d2306b0d56304,
+    .name = .wayland,
+    .fingerprint = 0xa8d655e4cf50fda,
     .version = "0.0.1",
-    .dependencies = .{
-        .xml = .{
-            .url = "git+https://github.com/JNetherwood-Imig/zig-xml.git#c66a4ee5df7b2c0f9e0dc067cbb82483ee7041e8",
-            .hash = "xml-0.0.1-JKFfL-K7AwBdFo5MQzKZlHqT3XeX6ZQd9Vepl7dq-daF",
-        },
-    },
     .minimum_zig_version = "0.15.2",
     .paths = .{
         "scanner",
@@ -15,5 +9,12 @@
         "examples",
         "build.zig",
         "build.zig.zon",
+    },
+    .dependencies = .{
+        .xml_old = .{ .path = "../xml" },
+        .xml = .{
+            .url = "git+https://github.com/ianprime0509/zig-xml#8874de5b846f4e3e806a062cd11a01b2bb90fc7a",
+            .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
+        },
     },
 }

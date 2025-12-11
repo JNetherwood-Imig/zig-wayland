@@ -3,6 +3,17 @@ const posix = std.posix;
 const testing = std.testing;
 const talloc = testing.allocator;
 
+pub fn MsgUnion(comptime count: usize) type {
+    return extern union {
+        header: Header,
+        buffer: [space(count)]u8,
+
+        pub fn init() @This() {
+            return .{ .header = length(count) };
+        }
+    };
+}
+
 pub const Header = extern struct {
     cmsg_len: usize,
     cmsg_level: c_int = posix.SOL.SOCKET,
@@ -26,7 +37,14 @@ pub inline fn space(count: usize) usize {
     return @"align"(@sizeOf(Header)) + @"align"(count * @sizeOf(posix.fd_t));
 }
 
-pub inline fn data(cmsg: *const Header) []const u8 {
+pub inline fn data(cmsg: *Header) []u8 {
+    const many_ptr = @as([*]Header, @ptrCast(cmsg));
+    const data_ptr = @as([*]u8, @ptrCast(many_ptr + 1));
+    const len = cmsg.cmsg_len - length(0);
+    return data_ptr[0..len];
+}
+
+pub inline fn dataConst(cmsg: *const Header) []const u8 {
     const many_ptr = @as([*]const Header, @ptrCast(cmsg));
     const data_ptr = @as([*]const u8, @ptrCast(many_ptr + 1));
     const len = cmsg.cmsg_len - length(0);
@@ -104,7 +122,7 @@ test "cmsg next header" {
         const len = space(@sizeOf(i32));
         var cmsg = std.mem.bytesAsValue(Header, ptr);
         cmsg.cmsg_len = len;
-        std.mem.bytesAsValue(i32, @constCast(data(cmsg))).* = @as(i32, @intCast(i));
+        std.mem.bytesAsValue(i32, data(cmsg)).* = @as(i32, @intCast(i));
         ptr += len;
     }
     var msg = posix.msghdr{

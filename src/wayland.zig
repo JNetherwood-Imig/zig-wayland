@@ -1,9 +1,11 @@
+pub const wire = @import("wire.zig");
 pub const Connection = @import("Connection.zig");
-pub const Fd = @import("Fd.zig");
 pub const Fixed = @import("Fixed.zig");
 pub const IdAllocator = @import("IdAllocator.zig");
 pub const ClientIdAllocator = @import("ClientIdAllocator.zig");
 pub const ServerIdAllocator = @import("ServerIdAllocator.zig");
+pub const FixedBufferClientIdAllocator = @import("FixedBufferClientIdAllocator.zig");
+pub const FixedBufferServerIdAllocator = @import("FixedBufferServerIdAllocator.zig");
 
 pub fn getConnectInfo() Connection.ConnectInfo {
     return Connection.ConnectInfo.default();
@@ -11,12 +13,12 @@ pub fn getConnectInfo() Connection.ConnectInfo {
 
 test {
     _ = Connection;
-    _ = Fd;
     _ = Fixed;
     _ = IdAllocator;
     _ = ClientIdAllocator;
     _ = ServerIdAllocator;
+    _ = FixedBufferClientIdAllocator;
+    _ = FixedBufferServerIdAllocator;
     _ = @import("cmsg.zig");
     _ = @import("scanner.zig");
-    _ = @import("wire.zig");
 }

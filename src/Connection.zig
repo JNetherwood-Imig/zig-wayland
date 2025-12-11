@@ -1,3 +1,5 @@
+const Connection = @This();
+
 handle: Fd,
 
 pub fn connect(info: ConnectInfo) ConnectError!Connection {
@@ -26,6 +28,35 @@ pub fn connect(info: ConnectInfo) ConnectError!Connection {
 
 pub fn close(self: Connection) void {
     self.handle.close();
+}
+
+pub fn sendMessage(
+    self: *Connection,
+    buffer: []const u8,
+) !void {
+    try posix.send(self.handle.raw, buffer, 0);
+}
+
+pub fn sendMessageWithFds(
+    self: *Connection,
+    buffer: []const u8,
+    comptime fd_count: usize,
+    fds: []const i32,
+) !void {
+    const control = cmsg.MsgUnion(fd_count).init();
+    @memcpy(
+        cmsg.data(&control.header)[0 .. fd_count * @sizeOf(i32)],
+        std.mem.sliceAsBytes(fds),
+    );
+    const msg = posix.msghdr_const{
+        .name = null,
+        .namelen = 0,
+        .iov = &.{posix.iovec_const{ .base = buffer.ptr, .len = buffer.len }},
+        .iovlen = 1,
+        .control = &control.buffer,
+        .controllen = control.header.cmsg_len,
+    };
+    try posix.sendmsg(self.handle.raw, &msg, 0);
 }
 
 pub const ConnectError = error{
@@ -81,11 +112,9 @@ pub const ConnectInfo = union(enum) {
 };
 
 const std = @import("std");
-const posix = std.posix;
-const log = std.log.scoped(.wayland);
-const Writer = std.Io.Writer;
-
 const wire = @import("wire.zig");
+const cmsg = @import("cmsg.zig");
+const log = std.log.scoped(.wayland);
+const posix = std.posix;
 const Fd = @import("Fd.zig");
-
-const Connection = @This();
+const Writer = std.Io.Writer;

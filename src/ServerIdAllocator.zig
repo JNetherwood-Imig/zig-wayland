@@ -1,3 +1,5 @@
+const ServerIdAllocator = @This();
+
 next_id: u32,
 free_list: std.ArrayList(u32),
 gpa: Allocator,
@@ -6,7 +8,7 @@ pub const Options = packed struct {
     free_list_initial_capacity: usize = 64,
 };
 
-pub fn init(gpa: Allocator, options: Options) !ClientIdAllocator {
+pub fn init(gpa: Allocator, options: Options) Allocator.Error!ServerIdAllocator {
     return .{
         .next_id = min_id,
         .free_list = try .initCapacity(gpa, options.free_list_initial_capacity),
@@ -14,13 +16,13 @@ pub fn init(gpa: Allocator, options: Options) !ClientIdAllocator {
     };
 }
 
-pub fn deinit(self: *ClientIdAllocator) void {
+pub fn deinit(self: *ServerIdAllocator) void {
     self.free_list.deinit(self.gpa);
 }
 
-pub fn allocator(self: *ClientIdAllocator) IdAllocator {
+pub fn allocator(self: *ServerIdAllocator) IdAllocator {
     return .{
-        .context = @ptrCast(self),
+        .context = self,
         .vtable = .{
             .alloc = alloc,
             .free = free,
@@ -28,25 +30,23 @@ pub fn allocator(self: *ClientIdAllocator) IdAllocator {
     };
 }
 
-fn alloc(context: *anyopaque) ?u32 {
-    var self: *ClientIdAllocator = @ptrCast(context);
+fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
+    var self: *ServerIdAllocator = @ptrCast(context);
     if (self.free_list.pop()) |id| return id;
     defer self.next_id += 1;
     return self.next_id;
 }
 
-fn free(context: *anyopaque, id: u32) void {
-    var self: *ClientIdAllocator = @ptrCast(context);
+fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
+    var self: *ServerIdAllocator = @ptrCast(context);
     if (id == self.next_id - 1)
         self.next_id = id
     else
-        self.free_list.append(self.gpa, id) catch unreachable;
+        try self.free_list.append(self.gpa, id);
 }
 
 const std = @import("std");
-const IdAllocator = @import("IdAllocator.zig");
-const Allocator = std.mem.Allocator;
-
 const min_id: u32 = 0xff000000;
 const max_id: u32 = 0xffffffff;
-const ClientIdAllocator = @This();
+const Allocator = std.mem.Allocator;
+const IdAllocator = @import("IdAllocator.zig");
