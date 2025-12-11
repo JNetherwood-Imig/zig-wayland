@@ -3,6 +3,7 @@
     .fingerprint = 0xa8d655e4cf50fda,
     .version = "0.0.1",
     .minimum_zig_version = "0.15.2",
+
     .paths = .{
         "scanner",
         "src",
@@ -10,11 +11,19 @@
         "build.zig",
         "build.zig.zon",
     },
+
     .dependencies = .{
-        .xml_old = .{ .path = "../xml" },
         .xml = .{
             .url = "git+https://github.com/ianprime0509/zig-xml#8874de5b846f4e3e806a062cd11a01b2bb90fc7a",
             .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
+        },
+        .wayland = .{
+            .url = "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.24.0/downloads/wayland-1.24.0.tar.xz",
+            .hash = "N-V-__8AAGoeGQBEn6KguTJUXrCE0tIRrrXfQX7hYHoKCJwZ",
+        },
+        .wayland_protocols = .{
+            .url = "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.45/downloads/wayland-protocols-1.45.tar.xz",
+            .hash = "N-V-__8AAIKCDgBX6hRMzFmvC-WAwrOH_ewvZgAzPGbBvavk",
         },
     },
 }

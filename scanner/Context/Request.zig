@@ -89,8 +89,6 @@ pub fn write(
         else => continue,
     } else false;
 
-    if (is_constructor) std.debug.print("Request {s} is a constructor.\n", .{self.name});
-
     const parent_interface_entry = try map.get(interface);
 
     const fn_name = try self.fnName(gpa);

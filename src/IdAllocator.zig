@@ -20,6 +20,10 @@ pub inline fn alloc(self: IdAllocator) AllocError!u32 {
     return self.vtable.alloc(self.context);
 }
 
+pub inline fn create(self: IdAllocator, comptime T: type) AllocError!T {
+    return @enumFromInt(try self.alloc());
+}
+
 pub inline fn free(self: IdAllocator, id: u32) FreeError!void {
     try self.vtable.free(self.context, id);
 }

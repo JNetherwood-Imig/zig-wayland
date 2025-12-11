@@ -1,7 +1,7 @@
 const Description = @This();
 
 summary: []const u8,
-body: ?[]const u8 = null,
+body: ?[]const u8,
 
 pub fn parse(gpa: Allocator, reader: *xml.Reader) !Description {
     const summary = for (0..reader.attributeCount()) |i| {
@@ -11,23 +11,23 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Description {
     } else return error.SummaryNotFound;
     errdefer gpa.free(summary);
 
-    var body: ?[]const u8 = null;
-    errdefer if (body) |b| gpa.free(b);
+    var body = try std.ArrayList(u8).initCapacity(gpa, 1024);
+    defer body.deinit(gpa);
 
     while (reader.read()) |node| switch (node) {
         .eof => return error.UnexpectedEof,
         .element_end => {
             const name = reader.elementName();
-            if (!std.mem.eql(u8, name, "description")) return error.UnexpectedElementEnd;
+            if (!std.mem.eql(u8, name, "description"))
+                return error.UnexpectedElementEnd;
             break;
         },
-        .text => {
-            body = try gpa.dupe(u8, reader.textRaw());
-        },
+        .text => try body.appendSlice(gpa, reader.textRaw()),
         else => continue,
     } else |err| return err;
 
-    return .{ .summary = summary, .body = body };
+    const maybe_body = if (body.items.len > 0) try body.toOwnedSlice(gpa) else null;
+    return .{ .summary = summary, .body = maybe_body };
 }
 
 pub fn deinit(self: *Description, gpa: Allocator) void {

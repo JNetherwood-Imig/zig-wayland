@@ -120,10 +120,24 @@ pub fn write(
 }
 
 pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]const u8 {
-    const stripped_name = if (std.mem.startsWith(u8, self.name, prefix))
-        self.name[prefix.len..]
-    else
-        return error.InvalidPrefix;
+    const stripped_name = name: {
+        const name = if (std.mem.startsWith(u8, self.name, prefix))
+            self.name[prefix.len..]
+        else
+            return error.InvalidPrefix;
+
+        if (std.mem.lastIndexOfScalar(u8, name, '_')) |idx| {
+            if (name.len > idx + 2 and
+                name[idx + 1] == 'v')
+            {
+                for (name[idx + 2 .. name.len]) |c| {
+                    if (!std.ascii.isDigit(c)) break :name name;
+                }
+                break :name name[0..idx];
+            }
+        }
+        break :name name;
+    };
     var output = try std.ArrayList(u8).initCapacity(gpa, stripped_name.len);
     var it = std.mem.tokenizeScalar(u8, stripped_name, '_');
 
