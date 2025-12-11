@@ -96,6 +96,11 @@ const Context = struct {
     }
 
     pub fn write(self: *const Context, gpa: Allocator, writer: *std.Io.Writer) !void {
+        try writer.writeAll("const core = @import(\"core\");\n");
+        try writer.writeAll("const Fixed = core.Fixed;\n");
+        try writer.writeAll("const Connection = core.Connection;\n");
+        try writer.writeAll("const IdAllocator = core.IdAllocator;\n");
+
         for (self.protocols.items) |protocol| {
             try writer.print("pub const {s} = struct {{\n", .{protocol.name});
             for (protocol.interfaces.items) |interface| {
@@ -109,11 +114,16 @@ const Context = struct {
                     "\t\tpub fn id(self: {s}) u32 {{\n\t\t\treturn @intFromEnum(self);\n\t\t}}\n",
                     .{type_name},
                 );
-                for (interface.requests.items) |request| {
+                for (interface.requests.items, 0..) |request, i| {
                     const fn_name = try fnName(gpa, request.name);
                     defer gpa.free(fn_name);
 
-                    try writer.print("\t\tpub fn {s}(\n\t\t\tself: {s},\n", .{ fn_name, type_name });
+                    const max_length = request.calculateMaxLength();
+                    try writer.print("\t\tpub const {s}_request_opcode = {d};\n", .{ request.name, i });
+                    try writer.print("\t\tpub const {s}_request_length = {d};\n", .{ request.name, max_length });
+
+                    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
+                    try writer.print("\t\t\tself: {s}\n", .{type_name});
                     try writer.print("\t\t) !{s} {{\n", .{"void"});
                     try writer.writeAll("\t\t\t_ = self;\n");
                     try writer.writeAll("\t\t}\n");
@@ -279,11 +289,8 @@ const Context = struct {
                 .eof => return error.UnexpectedEof,
                 .element_end => {
                     const elem = reader.elementName();
-                    if (!std.mem.eql(u8, elem, "interface")) {
-                        log.debug("Got element end {s}.", .{elem});
-                        continue;
-                        // return error.UnexpectedElementEnd;
-                    }
+                    if (!std.mem.eql(u8, elem, "interface"))
+                        return error.UnexpectedElementEnd;
                     break;
                 },
                 .element_start => {
@@ -404,6 +411,16 @@ const Context = struct {
             if (self.description) |*desc| desc.deinit(gpa);
             for (self.args.items) |*arg| arg.deinit(gpa);
             self.args.deinit(gpa);
+        }
+
+        pub fn calculateMaxLength(self: *const Request) usize {
+            var length: usize = 0;
+            for (self.args.items) |arg| switch (arg.type) {
+                .array, .string, .optional_string, .any_new_id => return 4096,
+                .fd => {},
+                else => length += 4,
+            };
+            return length;
         }
     };
 
@@ -729,7 +746,7 @@ const Context = struct {
 
             return .{
                 .name = name orelse return error.NameNotFound,
-                .summary = summary orelse return error.SummaryNotFound,
+                .summary = summary,
                 .description = description,
                 .type = try .resolve(type_str orelse return error.TypeNotFound, allow_null, interface, en),
             };
@@ -744,6 +761,16 @@ const Context = struct {
                 inline .@"enum", .object, .optional_object, .new_id => |str| gpa.free(str),
                 else => {},
             }
+        }
+
+        pub fn typeString(self: *const Arg) []const u8 {
+            return switch (self.type) {
+                .int => "i32",
+                .uint => "u32",
+                .fixed => "Fixed",
+                .any_object => "u32",
+                .any_new_id => "u32",
+            };
         }
     };
 
