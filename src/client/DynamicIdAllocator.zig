@@ -1,3 +1,10 @@
+const std = @import("std");
+const core = @import("core");
+const min_id: u32 = 0x00000001;
+const max_id: u32 = 0xfeffffff;
+const Allocator = std.mem.Allocator;
+const IdAllocator = core.IdAllocator;
+
 const DynamicIdAllocator = @This();
 
 next_id: u32,
@@ -47,10 +54,3 @@ fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
     else
         try self.free_list.append(self.gpa, id);
 }
-
-const std = @import("std");
-const core = @import("core");
-const min_id: u32 = 0x00000001;
-const max_id: u32 = 0xfeffffff;
-const Allocator = std.mem.Allocator;
-const IdAllocator = core.IdAllocator;

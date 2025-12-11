@@ -59,6 +59,10 @@ pub fn close(self: *Connection) void {
     posix.close(self.handle);
 }
 
+pub fn flush(self: *Connection) !void {
+    return self.writer.flush();
+}
+
 pub fn sendMessage(self: *Connection, buffer: []const u8) !void {
     try self.writer.writeData(buffer);
 }

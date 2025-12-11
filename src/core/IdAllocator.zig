@@ -29,5 +29,3 @@ pub inline fn createObject(self: IdAllocator, comptime T: type) AllocError!T {
 pub inline fn free(self: IdAllocator, id: u32) FreeError!void {
     try self.vtable.free(self.context, id);
 }
-
-const std = @import("std");

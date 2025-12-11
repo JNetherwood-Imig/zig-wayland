@@ -1,3 +1,10 @@
+const std = @import("std");
+const core = @import("core");
+const wire = core.wire;
+const log = std.log.scoped(.wayland_client);
+const Allocator = std.mem.Allocator;
+const Connection = core.Connection;
+
 pub fn EventHandler(comptime protocol: type) type {
     return struct {
         const Self = @This();
@@ -63,7 +70,7 @@ pub fn EventHandler(comptime protocol: type) type {
         }
 
         fn nextEvent(self: *const Self, conn: *Connection, wait: bool) !?protocol.Event {
-            conn.writer.flush() catch |e| switch (e) {
+            conn.flush() catch |e| switch (e) {
                 error.BrokenPipe => {},
                 else => return e,
             };
@@ -124,10 +131,3 @@ pub fn EventHandler(comptime protocol: type) type {
         }
     };
 }
-
-const std = @import("std");
-const core = @import("core");
-const wire = core.wire;
-const log = std.log.scoped(.wayland_client);
-const Allocator = std.mem.Allocator;
-const Connection = core.Connection;
