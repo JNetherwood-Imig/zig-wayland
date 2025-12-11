@@ -17,7 +17,7 @@ pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Writer {
     };
 }
 
-pub fn writeData(self: *Writer, data: []const u8) !void {
+pub fn writeData(self: *Writer, data: []const u8) FlushError!void {
     var written: usize = 0;
     while (true) {
         written += self.data.putMany(data);
@@ -26,7 +26,7 @@ pub fn writeData(self: *Writer, data: []const u8) !void {
     }
 }
 
-pub fn writeFds(self: *Writer, fds: []const posix.fd_t) !void {
+pub fn writeFds(self: *Writer, fds: []const posix.fd_t) FlushError!void {
     std.debug.assert(fds.len <= 20);
     var written: usize = 0;
     while (true) {
@@ -36,7 +36,9 @@ pub fn writeFds(self: *Writer, fds: []const posix.fd_t) !void {
     }
 }
 
-pub fn flush(self: *Writer) !void {
+pub const FlushError = posix.SendMsgError;
+
+pub fn flush(self: *Writer) FlushError!void {
     if (self.data.used() == 0) return;
     var iov: [2]posix.iovec_const = undefined;
     const iovlen = self.data.getIovecConst(&iov);
@@ -60,7 +62,6 @@ pub fn flush(self: *Writer) !void {
     };
 
     const sent = try posix.sendmsg(self.socket, &msg, 0);
-    std.log.debug("Wrote {d} bytes to server.", .{sent});
 
     var expected: usize = 0;
     for (0..iovlen) |i| expected += iov[i].len;

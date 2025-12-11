@@ -18,7 +18,9 @@ pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Reader {
     };
 }
 
-pub fn readIncoming(self: *Reader) !void {
+pub const ReadIncomingError = RecvMsgError;
+
+pub fn readIncoming(self: *Reader) ReadIncomingError!void {
     var buf: [4096]u8 = undefined;
     var iov = [1]posix.iovec{.{ .base = &buf, .len = buf.len }};
     var control: [cmsg.space(20)]u8 align(8) = @splat(0);
@@ -32,13 +34,12 @@ pub fn readIncoming(self: *Reader) !void {
         .flags = 0,
     };
     const read = try recvmsg(self.socket, &msg, 0);
-    std.log.debug("Read {d} bytes from server.", .{read});
     std.debug.assert(self.data.putMany(buf[0..read]) == read);
     var header = cmsg.firstHeader(&msg);
     while (header) |h| {
         const data = cmsg.dataConst(h);
         const fds = std.mem.bytesAsSlice(posix.fd_t, data);
-        if (self.fds.putMany(@alignCast(fds)) != fds.len) return error.OutOfSpace;
+        std.debug.assert(self.fds.putMany(@alignCast(fds)) == fds.len);
         header = cmsg.nextHeader(&msg, h);
     }
 }
@@ -60,7 +61,19 @@ pub fn getData(self: *Reader, buf: []u8) usize {
 
 // FIX
 // Taken from zig 0.16 std.posix since we don't have it yet
-fn recvmsg(sockfd: posix.fd_t, msg: *posix.msghdr, flags: u32) !usize {
+const RecvMsgError = error{
+    WouldBlock,
+    SystemFdQuotaExceeded,
+    ProcessFdQuotaExceeded,
+    SystemResources,
+    SocketUnconnected,
+    MessageOversize,
+    BrokenPipe,
+    ConnectionResetByPeer,
+    NetworkDown,
+} || error{Unexpected};
+
+fn recvmsg(sockfd: posix.fd_t, msg: *posix.msghdr, flags: u32) RecvMsgError!usize {
     while (true) {
         const rc = std.os.linux.recvmsg(sockfd, msg, flags);
         switch (posix.errno(rc)) {

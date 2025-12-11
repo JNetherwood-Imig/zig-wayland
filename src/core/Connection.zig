@@ -55,15 +55,23 @@ pub fn connect(
     };
 }
 
+pub const ConnectError = error{
+    InvalidWaylandSocket,
+    NoXdgRuntimeDir,
+    NameTooLong,
+} || posix.ConnectError || posix.SocketError;
+
 pub fn close(self: *Connection) void {
     posix.close(self.handle);
 }
 
-pub fn flush(self: *Connection) !void {
+pub const FlushError = Writer.FlushError;
+
+pub fn flush(self: *Connection) FlushError!void {
     return self.writer.flush();
 }
 
-pub fn sendMessage(self: *Connection, buffer: []const u8) !void {
+pub fn sendMessage(self: *Connection, buffer: []const u8) FlushError!void {
     try self.writer.writeData(buffer);
 }
 
@@ -71,12 +79,14 @@ pub fn sendMessageWithFds(
     self: *Connection,
     buffer: []const u8,
     fds: []const posix.fd_t,
-) !void {
+) Writer.FlushError!void {
     try self.writer.writeFds(fds);
     try self.writer.writeData(buffer);
 }
 
-pub fn pollEvents(self: *Connection, wait: bool) !bool {
+pub const PollEventsError = posix.PollError || Reader.ReadIncomingError;
+
+pub fn pollEvents(self: *Connection, wait: bool) PollEventsError!bool {
     var pfd = posix.pollfd{
         .fd = self.handle,
         .events = posix.POLL.IN,
@@ -86,12 +96,6 @@ pub fn pollEvents(self: *Connection, wait: bool) !bool {
     try self.reader.readIncoming();
     return true;
 }
-
-pub const ConnectError = error{
-    InvalidWaylandSocket,
-    NoXdgRuntimeDir,
-    NameTooLong,
-} || posix.ConnectError || posix.SocketError;
 
 pub const ConnectInfo = union(enum) {
     socket: i32,
@@ -140,7 +144,7 @@ pub const ConnectInfo = union(enum) {
         ida: IdAllocator,
         buffers: *Buffers,
     ) ConnectError!Connection {
-        return Connection.connect(self, ida, buffers);
+        return .connect(self, ida, buffers);
     }
 };
 
