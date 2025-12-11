@@ -10,6 +10,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/wayland_core.zig"),
     });
 
+    const doc_object = b.addObject(.{ .name = "wayland_core", .root_module = core });
+    const install_doc_object = b.addInstallDirectory(.{
+        .source_dir = doc_object.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const doc_step = b.step("docs", "Generate docs.");
+    doc_step.dependOn(&install_doc_object.step);
+
     const test_exe = b.addTest(.{ .root_module = core });
     const run_test = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run all tests.");
