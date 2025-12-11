@@ -1,33 +1,50 @@
-pub const Header = extern struct {
-    object: u32,
-    opcode: u16,
-    length: u16,
+//! Utility functions and types for serializing and deserializing messages according to
+//! the Wayland wire protocol (see https://wayland.freedesktop.org/docs/html/ch04.html).
+
+/// Two-word message header containing target object id, message opcode, and length in bytes,
+/// including the header.
+pub const Header = switch (@import("builtin").target.cpu.arch.endian()) {
+    .little => extern struct {
+        object: u32,
+        opcode: u16,
+        length: u16,
+    },
+    .big => extern struct {
+        object: u32,
+        length: u16,
+        opcode: u16,
+    },
 };
 
+/// A null-terminated string with undefined byte encoding,
+/// prefixed by its length including the null terminator.
 pub const String = struct {
-    padded_len: usize,
     data: [:0]const u8,
-
-    pub fn init(data: ?[:0]const u8) ?String {
-        return if (data) |d| String{
-            .padded_len = roundup4(d.len + 1),
-            .data = d,
-        } else null;
-    }
-};
-
-pub const Array = struct {
     padded_len: usize,
-    data: []const u8,
 
-    pub fn init(data: []const u8) Array {
-        return Array{
-            .padded_len = roundup4(data.len),
+    pub fn init(data: [:0]const u8) String {
+        return .{
             .data = data,
+            .padded_len = roundup4(data.len + 1),
         };
     }
 };
 
+/// A blob of data prefixed by its length
+pub const Array = struct {
+    data: []const u8,
+    padded_len: usize,
+
+    pub fn init(data: []const u8) Array {
+        return .{
+            .data = data,
+            .padded_len = roundup4(data.len),
+        };
+    }
+};
+
+/// A new id argument whose interface and version cannot be determined from the xml,
+/// and therefore must be prefixed by this information.
 pub const GenericNewId = struct {
     interface: String,
     version: u32,
@@ -35,13 +52,14 @@ pub const GenericNewId = struct {
 
     pub fn init(comptime T: type, version: T.Version, new_id: u32) GenericNewId {
         return .{
-            .interface = String.init(T.interface).?,
+            .interface = .init(T.interface),
             .version = @intFromEnum(version),
             .new_id = new_id,
         };
     }
 };
 
+/// Serialize `args` to `buffer`, encoding `object` and `opcode` in the header.
 pub fn serializeArgs(
     buffer: []u8,
     object: u32,
@@ -57,13 +75,8 @@ pub fn serializeArgs(
     @memcpy(buffer[0..@sizeOf(Header)], std.mem.asBytes(&head));
 
     var index: usize = @sizeOf(Header);
-
-    switch (@typeInfo(@TypeOf(args))) {
-        .@"struct" => |s| inline for (s.fields) |f| {
-            index += serializeArg(buffer[index..], @field(args, f.name));
-        },
-        else => @compileError("Expected args to be a struct or tuple."),
-    }
+    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |f|
+        index += serializeArg(buffer[index..], @field(args, f.name));
 
     return length;
 }

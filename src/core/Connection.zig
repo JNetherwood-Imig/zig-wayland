@@ -1,3 +1,5 @@
+//! Client/Server agnostic socket abstraction for exchanging messages.
+
 const std = @import("std");
 const IdAllocator = @import("IdAllocator.zig");
 const Reader = @import("Connection/Reader.zig");
@@ -8,73 +10,41 @@ const Connection = @This();
 
 handle: posix.fd_t,
 ida: IdAllocator,
+/// Ring buffer wrapper for outgoing data and file descriptors
 writer: Writer,
+/// Ring buffer wrapper for incoming data and file descriptors
 reader: Reader,
 
-pub fn connect(
-    info: ConnectInfo,
-    ida: IdAllocator,
-    buffers: *Buffers,
-) ConnectError!Connection {
-    const handle = conn: switch (info) {
-        .socket => |fd| fd: {
-            switch (posix.errno(std.os.linux.fcntl(fd, std.os.linux.F.GETFD, 0))) {
-                .SUCCESS => {
-                    const stat = try posix.fstat(fd);
-                    if (!posix.S.ISSOCK(stat.mode)) return error.InvalidWaylandSocket;
-                },
-                .BADF => return error.InvalidWaylandSocket,
-                else => |e| return posix.unexpectedErrno(e),
-            }
-            break :fd fd;
-        },
-        .name => |name| handle: {
-            const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse
-                return error.NoXdgRuntimeDir;
-            var path_buf: [108]u8 = @splat(0);
-            const path = std.fmt.bufPrint(
-                &path_buf,
-                "{s}/{s}",
-                .{ xdg_runtime_dir, name },
-            ) catch return error.NameTooLong;
-            const socket = try std.net.connectUnixSocket(path);
-            break :handle socket.handle;
-        },
-        .path => |path| handle: {
-            const socket = try std.net.connectUnixSocket(path);
-            break :handle socket.handle;
-        },
-        .fallback => continue :conn .{ .name = "wayland-0" },
-    };
-
-    return Connection{
+/// Initializes all fields of a `Connection`,
+/// assuming that `handle` is already an established socket.
+pub fn init(handle: posix.fd_t, ida: IdAllocator, buffers: *Buffers) Connection {
+    return .{
         .handle = handle,
         .ida = ida,
-        .reader = .init(handle, &buffers.data_in, &buffers.fds_in),
-        .writer = .init(handle, &buffers.data_out, &buffers.fds_out),
+        .reader = .init(handle, buffers.data_in, buffers.fds_in),
+        .writer = .init(handle, buffers.data_out, buffers.fds_out),
     };
 }
 
-pub const ConnectError = error{
-    InvalidWaylandSocket,
-    NoXdgRuntimeDir,
-    NameTooLong,
-} || posix.ConnectError || posix.SocketError;
-
+/// Close the underlying connection file descriptor.
 pub fn close(self: *Connection) void {
     posix.close(self.handle);
 }
 
 pub const FlushError = Writer.FlushError;
 
+/// Send all outgoing data and file descriptors.
 pub fn flush(self: *Connection) FlushError!void {
     return self.writer.flush();
 }
 
+/// Write data to the underlying ring buffer, flushing the connection if the ring buffer fills up.
 pub fn sendMessage(self: *Connection, buffer: []const u8) FlushError!void {
     try self.writer.writeData(buffer);
 }
 
+/// Write data and file descriptors to their respective ring buffers,
+/// flushing both if either fills up.
 pub fn sendMessageWithFds(
     self: *Connection,
     buffer: []const u8,
@@ -86,71 +56,34 @@ pub fn sendMessageWithFds(
 
 pub const PollEventsError = posix.PollError || Reader.ReadIncomingError;
 
+/// Poll for events on the socket file descriptor and read incoming messages.
+/// Stores incoming data and file descriptors in their respective ring buffers to be popped later
+/// without performing another read.
+/// Returns immediately if `wait` is false, otherwise it will wait indefinately.
 pub fn pollEvents(self: *Connection, wait: bool) PollEventsError!bool {
     var pfd = posix.pollfd{
         .fd = self.handle,
         .events = posix.POLL.IN,
         .revents = 0,
     };
+    // If we get no signaled fds before timing out, return false
     if (try posix.poll((&pfd)[0..1], if (wait) -1 else 0) == 0) return false;
+    // We have data, so read it into the buffer
     try self.reader.readIncoming();
     return true;
 }
 
-pub const ConnectInfo = union(enum) {
-    socket: i32,
-    name: []const u8,
-    path: []const u8,
-    fallback: void,
-
-    pub fn default() ConnectInfo {
-        if (posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
-            if (std.fmt.parseInt(i32, wayland_socket, 10)) |raw_fd| {
-                return .{ .socket = raw_fd }; // TODO validate fd
-            } else |_| {}
-        }
-        if (posix.getenv("WAYLAND_DISPLAY")) |wayland_display| {
-            if (std.fs.path.isAbsolute(wayland_display))
-                return .{ .path = wayland_display }
-            else
-                return .{ .name = wayland_display };
-        }
-        return .fallback;
-    }
-
-    pub fn initSocket(socket: posix.fd_t) ConnectInfo {
-        return .{ .socket = socket };
-    }
-
-    pub fn initName(name: []const u8) ConnectInfo {
-        return .{ .name = name };
-    }
-
-    pub fn initPath(path: []const u8) ConnectInfo {
-        return .{ .path = path };
-    }
-
-    pub fn format(self: ConnectInfo, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        switch (self) {
-            .socket => |sock| try writer.print("socket fd '{d}'", .{sock}),
-            .name => |name| try writer.print("endpoint name '{s}'", .{name}),
-            .path => |path| try writer.print("path '{s}'", .{path}),
-            .fallback => try writer.writeAll("fallback 'wayland-0'"),
-        }
-    }
-
-    pub fn connect(
-        self: ConnectInfo,
-        ida: IdAllocator,
-        buffers: *Buffers,
-    ) ConnectError!Connection {
-        return .connect(self, ida, buffers);
-    }
-};
-
+/// Utility struct to ease the process of creating backing buffers to be used by the connection.
+/// These are created on the stack because the reasonably can be,
+/// but they can be manually created in whatever way the user pleases.
+/// This struct creates buffers that hold the libwayland-imposed maximum message size worth of data
+/// and the libwayland maximum closure argument count worth of file descriptors.
 pub const Buffers = struct {
-    data_in: [4096]u8 = @splat(0),
-    data_out: [4096]u8 = @splat(0),
-    fds_in: [20]posix.fd_t = @splat(-1),
-    fds_out: [20]posix.fd_t = @splat(-1),
+    const libwayland_max_message_size = 4096;
+    const libwayland_max_fds = 20;
+
+    data_in: [libwayland_max_message_size]u8 = @splat(0),
+    data_out: [libwayland_max_message_size]u8 = @splat(0),
+    fds_in: [libwayland_max_fds]posix.fd_t = @splat(-1),
+    fds_out: [libwayland_max_fds]posix.fd_t = @splat(-1),
 };

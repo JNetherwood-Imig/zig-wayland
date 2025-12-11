@@ -1,31 +1,39 @@
+//! Private utility module for working with socket control messages.
+
 const std = @import("std");
 const posix = std.posix;
 const testing = std.testing;
-const talloc = testing.allocator;
+
+const alignment: usize = @sizeOf(usize);
 
 pub const Header = extern struct {
     len: usize,
     level: c_int = posix.SOL.SOCKET,
-    type: c_int = 0x01, // SCM_RIGHTS
+    type: c_int = 0x01, // SCM_RIGHTS (used for passing fds)
 
 };
 
+/// Returns `size` rounded up to `@sizeOf(usize)` bytes.
 pub inline fn @"align"(size: usize) usize {
-    return size + @sizeOf(usize) - 1 & ~(@sizeOf(usize) - @as(usize, 1));
+    return size + alignment - 1 & ~(alignment - 1);
 }
 
+/// Returns the number of padding bytes added for alignment purposes.
 pub inline fn padding(size: usize) usize {
-    return (@sizeOf(usize) - (size & (@sizeOf(usize) - 1))) & (@sizeOf(usize) - 1);
+    return (alignment - (size & (alignment - 1))) & (alignment - 1);
 }
 
+/// Returns the length of the cmsg buffer which stores `count` fds.
 pub inline fn length(count: usize) usize {
     return @"align"(@sizeOf(Header)) + count * @sizeOf(posix.fd_t);
 }
 
+/// Returns the amount of space that should be given to a buffer which stores `count` fds.
 pub inline fn space(count: usize) usize {
     return @"align"(@sizeOf(Header)) + @"align"(count * @sizeOf(posix.fd_t));
 }
 
+/// Returns a mutable slice of the cmsg data, with its length derived from the header.
 pub inline fn data(cmsg: *Header) []u8 {
     const many_ptr = @as([*]Header, @ptrCast(cmsg));
     const data_ptr = @as([*]u8, @ptrCast(many_ptr + 1));
@@ -33,6 +41,7 @@ pub inline fn data(cmsg: *Header) []u8 {
     return data_ptr[0..len];
 }
 
+/// Returns an immutable slice of the cmsg data, with its length derived from the header.
 pub inline fn dataConst(cmsg: *const Header) []const u8 {
     const many_ptr = @as([*]const Header, @ptrCast(cmsg));
     const data_ptr = @as([*]const u8, @ptrCast(many_ptr + 1));
@@ -40,6 +49,8 @@ pub inline fn dataConst(cmsg: *const Header) []const u8 {
     return data_ptr[0..len];
 }
 
+/// Returns a pointer to the first control header associated with `message`,
+/// or `null` if there are none.
 pub inline fn firstHeader(message: *const posix.msghdr) ?*const Header {
     return if (message.controllen >= @sizeOf(Header) and message.control != null)
         @as(*const Header, @ptrCast(@alignCast(message.control.?)))
@@ -47,18 +58,19 @@ pub inline fn firstHeader(message: *const posix.msghdr) ?*const Header {
         null;
 }
 
+/// Returns a pointer to the next control header after `cmsg` associated with `message`,
+/// or `null` of `cmsg` is the last header.
+/// Based on glibc __cmsg_nxthdr (see https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/cmsg_nxthdr.c)
 pub inline fn nextHeader(message: *const posix.msghdr, cmsg: *const Header) ?*const Header {
-    if (message.control == null or cmsg.len < @sizeOf(Header)) return null;
-
-    const control_ptr = @as(usize, @intFromPtr(message.control.?));
-    const cmsg_ptr = @as(usize, @intFromPtr(cmsg));
+    const control_ptr: [*]align(alignment) const u8 = @ptrCast(@alignCast(message.control.?));
+    const cmsg_ptr: [*]align(alignment) const u8 = @ptrCast(cmsg);
     const size_needed = @sizeOf(Header) + padding(cmsg.len);
 
     if (control_ptr + message.controllen - cmsg_ptr < size_needed or
         control_ptr + message.controllen - cmsg_ptr - size_needed < cmsg.len)
         return null;
 
-    return @as(*const Header, @ptrFromInt(cmsg_ptr + @"align"(cmsg.len)));
+    return @as(*const Header, @ptrCast(@alignCast(cmsg_ptr + @"align"(cmsg.len))));
 }
 
 test "cmsg align" {
