@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// FIX
+/// This implementation is not actually what is best for serialization and deserialization,
+/// especially once edge-cases are involved.
+/// This will all be replaced, but it is not a priority right now because.
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         buffer: []T,
