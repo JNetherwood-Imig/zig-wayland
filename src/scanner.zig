@@ -46,18 +46,84 @@ pub fn main() !void {
     }
 }
 
+const Context = struct {
+    protocols: std.ArrayList(),
+
+    const Protocol = struct {
+        name: []const u8,
+        description: ?Description = null,
+        interfaces: std.ArrayList(Interface),
+    };
+
+    const Interface = struct {
+        name: []const u8,
+        version: u32,
+        description: ?Description = null,
+        requests: std.ArrayList(Request),
+        events: std.ArrayList(Event),
+        enums: std.ArrayList(Enum),
+    };
+
+    const Request = struct {
+        name: []const u8,
+        type: enum { none, destructor } = .none,
+        since: u32 = 1,
+        deprecated_since: u32 = 0,
+        description: ?Description = null,
+        args: std.ArrayList(Arg),
+    };
+
+    const Event = struct {
+        name: []const u8,
+        type: enum { none, destructor } = .none,
+        since: u32 = 1,
+        deprecated_since: u32 = 0,
+        description: ?Description = null,
+        args: std.ArrayList(Arg),
+    };
+
+    const Enum = struct {
+        name: []const u8,
+        since: u32 = 1,
+        type: enum { none, bitfield } = .none,
+        description: ?Description = null,
+        entries: std.ArrayList(Entry),
+    };
+
+    const Entry = struct {
+        name: []const u8,
+        value: u32,
+        summary: ?[]const u8 = null,
+        since: u32 = 1,
+        deprecated_since: u32 = 0,
+        description: ?Description = null,
+    };
+
+    const Arg = struct {
+        name: []const u8,
+        type: enum { int, uint, fixed, object, new_id, string, array, fd },
+        const Type = union(enum) {
+            int: void,
+            uint: void,
+            fixed: void,
+            string: void,
+            optional_string: void,
+            object: ?[]const u8,
+            optional_object: ?[]const u8,
+            new_id: ?[]const u8,
+            array: void,
+            fd: void,
+        };
+    };
+
+    const Description = struct {
+        summary: []const u8,
+        body: []const u8,
+    };
+};
+
 fn parseDoc(reader: *xml.Reader) !void {
     while (reader.read()) |node| switch (node) {
-        // eof,
-        // xml_declaration,
-        // element_start,
-        // element_end,
-        // comment,
-        // pi,
-        // text,
-        // cdata,
-        // character_reference,
-        // entity_reference,
         .eof => return error.UnexpectedEof,
         .element_start => {
             const name = reader.elementName();
