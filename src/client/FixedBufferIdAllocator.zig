@@ -1,3 +1,9 @@
+//! An id allocator with a free-list backed by a fixed buffer, meaning it will never allocate memory,
+//! but may run out of space when freeing ids.
+//! This is probably not a good choice for large projects,
+//! or instances where the maximum number of allocated ids is not able to be estimated,
+//! but is very light and performant for small and/or known-demand clients.
+
 const std = @import("std");
 const core = @import("core");
 const min_id: u32 = 0x00000001;
@@ -10,6 +16,9 @@ const FixedBufferIdAllocator = @This();
 next_id: u32,
 free_list: std.ArrayList(u32),
 
+/// Initialize an allocator state backed by a buffer,
+/// whose capacity will be the maximum number of free ids
+/// that can be tracked at any given time.
 pub fn init(buffer: []u32) FixedBufferIdAllocator {
     return .{
         .next_id = min_id,
@@ -17,7 +26,8 @@ pub fn init(buffer: []u32) FixedBufferIdAllocator {
     };
 }
 
-pub fn allocator(self: *FixedBufferIdAllocator) IdAllocator {
+/// Get an IdAllocator interface for the FixedBufferAllocator
+pub fn id_allocator(self: *FixedBufferIdAllocator) IdAllocator {
     return .{
         .context = self,
         .vtable = .{

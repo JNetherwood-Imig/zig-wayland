@@ -1,3 +1,6 @@
+//! An id allocator which uses a general-purpose allocator to track ids without bounds.
+//! It is almost always the correct choice for large clients.
+
 const std = @import("std");
 const core = @import("core");
 const min_id: u32 = 0x00000001;
@@ -15,6 +18,8 @@ pub const Options = packed struct {
     free_list_initial_capacity: usize = 64,
 };
 
+/// Initialize the id allocator state with space for options.free_list_initial_capacity
+/// elements in free-list (arbitrarily defaults to 64)
 pub fn init(gpa: Allocator, options: Options) Allocator.Error!DynamicIdAllocator {
     return .{
         .next_id = min_id,
@@ -23,11 +28,13 @@ pub fn init(gpa: Allocator, options: Options) Allocator.Error!DynamicIdAllocator
     };
 }
 
+/// Free the memory for the free-list
 pub fn deinit(self: *DynamicIdAllocator) void {
     self.free_list.deinit(self.gpa);
 }
 
-pub fn allocator(self: *DynamicIdAllocator) IdAllocator {
+/// Get an IdAllocator interface for the DynamicIdAllocator
+pub fn id_allocator(self: *DynamicIdAllocator) IdAllocator {
     return .{
         .context = self,
         .vtable = .{

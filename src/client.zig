@@ -1,3 +1,5 @@
+//! Core components of Wayland client API
+
 const core = @import("core");
 
 pub const DynamicIdAllocator = @import("client/DynamicIdAllocator.zig");
