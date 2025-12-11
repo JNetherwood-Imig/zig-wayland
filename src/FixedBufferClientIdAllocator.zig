@@ -6,7 +6,7 @@ free_list: std.ArrayList(u32),
 pub fn init(buffer: []u32) FixedBufferClientIdAllocator {
     return .{
         .next_id = min_id,
-        .free_list = try .initBuffer(buffer),
+        .free_list = .initBuffer(buffer),
     };
 }
 
@@ -21,14 +21,14 @@ pub fn allocator(self: *FixedBufferClientIdAllocator) IdAllocator {
 }
 
 fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
-    var self: *FixedBufferClientIdAllocator = @ptrCast(context);
+    var self: *FixedBufferClientIdAllocator = @ptrCast(@alignCast(context));
     if (self.free_list.pop()) |id| return id;
     defer self.next_id += 1;
     return self.next_id;
 }
 
 fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
-    var self: *FixedBufferClientIdAllocator = @ptrCast(context);
+    var self: *FixedBufferClientIdAllocator = @ptrCast(@alignCast(context));
     if (id == self.next_id - 1)
         self.next_id = id
     else

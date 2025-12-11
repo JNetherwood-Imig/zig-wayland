@@ -1,0 +1,82 @@
+const Protocol = @This();
+
+prefix: []const u8,
+name: []const u8,
+description: ?Description = null,
+interfaces: std.ArrayList(Interface),
+
+pub fn parse(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Protocol {
+    const name = for (0..reader.attributeCount()) |i| {
+        const attrib = reader.attributeName(i);
+        if (!std.mem.eql(u8, attrib, "name")) continue;
+        break try reader.attributeValueAlloc(gpa, i);
+    } else return error.NameNotFound;
+    errdefer gpa.free(name);
+
+    var description: ?Description = null;
+    errdefer if (description) |*desc| desc.deinit(gpa);
+
+    var interfaces = try std.ArrayList(Interface).initCapacity(gpa, 4);
+    errdefer interfaces.deinit(gpa);
+
+    while (reader.read()) |node| switch (node) {
+        .eof => return error.UnexpectedEof,
+        .element_end => {
+            const elem = reader.elementName();
+            if (std.mem.eql(u8, elem, "copyright"))
+                continue
+            else if (!std.mem.eql(u8, elem, "protocol"))
+                return error.UnexpectedElementEnd;
+            break;
+        },
+        .element_start => {
+            const elem = reader.elementName();
+            if (std.mem.eql(u8, elem, "copyright"))
+                continue
+            else if (std.mem.eql(u8, elem, "description"))
+                description = try Description.parse(gpa, reader)
+            else if (std.mem.eql(u8, elem, "interface")) {
+                var interface = try Interface.parse(gpa, reader);
+                errdefer interface.deinit(gpa);
+                try interfaces.append(gpa, interface);
+            } else return error.UnexpectedElement;
+        },
+        else => continue,
+    } else |err| return err;
+
+    return .{
+        .prefix = try gpa.dupe(u8, prefix),
+        .name = name,
+        .description = description,
+        .interfaces = interfaces,
+    };
+}
+
+pub fn deinit(self: *Protocol, gpa: Allocator) void {
+    if (self.description) |*d| d.deinit(gpa);
+    for (self.interfaces.items) |*i| i.deinit(gpa);
+    self.interfaces.deinit(gpa);
+    gpa.free(self.prefix);
+    gpa.free(self.name);
+}
+
+pub fn write(
+    self: *const Protocol,
+    gpa: Allocator,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+) !void {
+    try writer.print("pub const {s} = struct {{\n", .{self.name});
+
+    for (self.interfaces.items) |interface|
+        try interface.write(gpa, writer, map);
+
+    try writer.writeAll("};\n");
+}
+
+const std = @import("std");
+const xml = @import("xml");
+const Description = @import("Description.zig");
+const Interface = @import("Interface.zig");
+const InterfaceMap = @import("InterfaceMap.zig");
+const Allocator = std.mem.Allocator;

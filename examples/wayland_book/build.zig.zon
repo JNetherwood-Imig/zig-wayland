@@ -4,7 +4,6 @@
     .minimum_zig_version = "0.15.2",
     .paths = .{
         "src",
-        "protocols",
         "build.zig",
         "build.zig.zon",
     },

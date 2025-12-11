@@ -20,5 +20,4 @@ test {
     _ = FixedBufferClientIdAllocator;
     _ = FixedBufferServerIdAllocator;
     _ = @import("cmsg.zig");
-    _ = @import("scanner.zig");
 }

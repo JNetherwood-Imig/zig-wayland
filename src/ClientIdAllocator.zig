@@ -31,14 +31,14 @@ pub fn allocator(self: *ClientIdAllocator) IdAllocator {
 }
 
 fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
-    var self: *ClientIdAllocator = @ptrCast(context);
+    var self: *ClientIdAllocator = @ptrCast(@alignCast(context));
     if (self.free_list.pop()) |id| return id;
     defer self.next_id += 1;
     return self.next_id;
 }
 
 fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
-    var self: *ClientIdAllocator = @ptrCast(context);
+    var self: *ClientIdAllocator = @ptrCast(@alignCast(context));
     if (id == self.next_id - 1)
         self.next_id = id
     else

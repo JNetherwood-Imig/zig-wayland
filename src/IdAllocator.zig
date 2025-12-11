@@ -1,5 +1,5 @@
 context: *anyopaque,
-vtable: *const VTable,
+vtable: VTable,
 
 pub const VTable = struct {
     alloc: *const fn (*anyopaque) AllocError!u32,

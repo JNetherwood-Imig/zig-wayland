@@ -44,9 +44,9 @@ pub fn serializeArgs(
     buffer: []u8,
     object: u32,
     opcode: u16,
-    length: u16,
     args: anytype,
 ) !void {
+    const length = calculateArgsLength(args);
     const head = Header{
         .object = object,
         .opcode = opcode,
@@ -66,6 +66,17 @@ pub fn serializeArgs(
 
 const std = @import("std");
 const Fixed = @import("Fixed.zig");
+
+fn calculateArgsLength(args: anytype) usize {
+    var length: usize = 8;
+    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
+        switch (field.type) {
+            String, Array => length += @field(args, field.name).padded_len,
+            GenericNewId => length += (@field(args, field.name).interface.padded_len + 8),
+            else => length += 4,
+        }
+    }
+}
 
 fn serializeArg(buffer: []u8, arg: anytype) !usize {
     const T = @TypeOf(arg);

@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .root_source_file = b.path("src/scanner.zig"),
+            .root_source_file = b.path("scanner/scanner.zig"),
         }),
     });
     scanner.root_module.addImport("xml", xml.module("xml"));
