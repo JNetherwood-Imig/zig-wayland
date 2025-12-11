@@ -6,7 +6,6 @@ pub const ClientIdAllocator = @import("ClientIdAllocator.zig");
 pub const ServerIdAllocator = @import("ServerIdAllocator.zig");
 pub const FixedBufferClientIdAllocator = @import("FixedBufferClientIdAllocator.zig");
 pub const FixedBufferServerIdAllocator = @import("FixedBufferServerIdAllocator.zig");
-pub const client_protocol = @import("client_protocol");
 
 pub fn getConnectInfo() Connection.ConnectInfo {
     return Connection.ConnectInfo.default();

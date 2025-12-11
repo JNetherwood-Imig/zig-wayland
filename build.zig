@@ -4,12 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const bundle_protocols = b.option(
-        bool,
-        "bundle_protocols",
-        "Whether to bundle generated code for wayland core and wayland protocols.",
-    ) orelse true;
-
     const wayland = b.addModule("wayland", .{
         .target = target,
         .optimize = optimize,
@@ -18,7 +12,8 @@ pub fn build(b: *std.Build) void {
 
     const scanner = makeScanner(b, target, optimize);
 
-    if (bundle_protocols) bundleProtocols(b, target, optimize, scanner, wayland);
+    const client_protocol, const server_protocol = bundleProtocols(b, target, optimize, scanner, wayland);
+    _ = server_protocol;
 
     const test_exe = b.addTest(.{ .root_module = wayland });
     const run_test = b.addRunArtifact(test_exe);
@@ -34,6 +29,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     wayland_book.root_module.addImport("zwl", wayland);
+    wayland_book.root_module.addImport("client_protocol", client_protocol);
     b.installArtifact(wayland_book);
     const run_wayland_book = b.addRunArtifact(wayland_book);
     const run_wayland_book_step = b.step("run-wayland-book", "Run wayland-book example.");
@@ -54,12 +50,13 @@ fn bundleProtocols(
     optimize: std.builtin.OptimizeMode,
     scanner: *std.Build.Step.Compile,
     wayland: *std.Build.Module,
-) void {
+) struct { *std.Build.Module, *std.Build.Module } {
     const wayland_dep = b.dependency("wayland", .{});
     const wayland_xml = wayland_dep.path("protocol/wayland.xml");
     const wayland_protocols_dep = b.dependency("wayland_protocols", .{});
 
-    inline for (.{"client"}) |side| {
+    var ret: struct { *std.Build.Module, *std.Build.Module } = undefined;
+    inline for (.{ "client", "server" }, 0..) |side, i| {
         const run_scanner = b.addRunArtifact(scanner);
         run_scanner.addArgs(&.{ "-p", "wl_" });
         run_scanner.addFileArg(wayland_xml);
@@ -73,13 +70,15 @@ fn bundleProtocols(
         run_scanner.addArg("-o");
         const output = run_scanner.addOutputFileArg(side ++ "_protocol.zig");
 
-        const mod = b.createModule(.{
+        @field(ret, std.meta.fields(@TypeOf(ret))[i].name) = b.addModule(side ++ "_protocol", .{
             .target = target,
             .optimize = optimize,
             .root_source_file = output,
+            .imports = &.{.{ .name = "core", .module = wayland }},
         });
-        wayland.addImport(side ++ "_protocol", mod);
     }
+
+    return ret;
 }
 
 fn makeScanner(

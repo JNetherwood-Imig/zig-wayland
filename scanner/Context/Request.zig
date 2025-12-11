@@ -84,11 +84,6 @@ pub fn write(
     interface: []const u8,
     opcode: usize,
 ) !void {
-    const is_constructor = for (self.args.items) |arg| switch (arg.type) {
-        .new_id, .any_new_id => break true,
-        else => continue,
-    } else false;
-
     const parent_interface_entry = try map.get(interface);
 
     const fn_name = try self.fnName(gpa);
@@ -98,10 +93,13 @@ pub fn write(
     try writer.print("\t\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
     try writer.print("\t\tpub const {s}_request_length = {d};\n", .{ self.name, max_length });
 
-    if (is_constructor)
-        try self.writeConstructor()
-    else
-        try self.writeNormal(writer, map, parent_interface_entry.type_name, fn_name);
+    for (self.args.items) |arg| switch (arg.type) {
+        .new_id => return self.writeConstructor(writer, map, parent_interface_entry.type_name, fn_name),
+        .any_new_id => return self.writeAnyConstructor(writer, map, parent_interface_entry.type_name, fn_name),
+        else => continue,
+    };
+
+    try self.writeNormal(writer, map, parent_interface_entry.type_name, fn_name);
 }
 
 fn writeNormal(
@@ -115,7 +113,7 @@ fn writeNormal(
     try writer.print("\t\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\t\tconnection: *Connection,\n");
     for (self.args.items) |arg| try arg.write(writer, map);
-    try writer.print("\t\t) !{s} {{\n", .{"void"});
+    try writer.writeAll("\t\t) !void {\n");
     try writer.writeAll("\t\t\t_ = connection;\n");
     for (self.args.items) |arg| try writer.print("\t\t\t_ = {s};\n", .{arg.name});
     try writer.print(
@@ -129,8 +127,47 @@ fn writeNormal(
     try writer.writeAll("\t\t}\n");
 }
 
-fn writeConstructor(self: *const Request) !void {
-    _ = self;
+fn writeConstructor(
+    self: *const Request,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+    parent_interface: []const u8,
+    fn_name: []const u8,
+) !void {
+    const return_arg = for (self.args.items) |arg| {
+        if (arg.type == .new_id) break arg;
+    } else unreachable;
+    const entry = try map.get(return_arg.type.new_id);
+
+    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
+    try writer.print("\t\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\t\tconnection: *Connection,\n");
+    try writer.writeAll("\t\t\tida: IdAllocator,\n");
+    for (self.args.items) |arg| try arg.write(writer, map);
+
+    try writer.print("\t\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
+
+    try writer.writeAll("\t\t\t_ = self;\n\t\t\t_ = connection;\n");
+    for (self.args.items) |arg| if (arg.type != .new_id) try writer.print("\t\t\t_ = {s};\n", .{arg.name});
+    try writer.print(
+        "\t\t\tconst new_{s} = try ida.create({s}.{s});\n",
+        .{ return_arg.name, entry.protocol, entry.type_name },
+    );
+    try writer.print("\t\t\treturn new_{s};\n", .{return_arg.name});
+    try writer.writeAll("\t\t}\n");
+}
+
+fn writeAnyConstructor(
+    self: *const Request,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+    parent_interface: []const u8,
+    fn_name: []const u8,
+) !void {
+    _ = map;
+    _ = parent_interface;
+    std.debug.print("Writing any constructor for {s}.\n", .{self.name});
+    try writer.print("\t\tpub fn {s}() void {{}}", .{fn_name});
 }
 
 fn writeSerialize(
