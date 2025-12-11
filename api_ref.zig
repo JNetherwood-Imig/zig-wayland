@@ -1,55 +1,109 @@
 const zwl = struct {
     const std = @import("std");
-    pub const Connection = struct {
-        socket: i32,
-        proxies: std.ArrayList(Proxy),
-
-        pub fn validateRequest(
-            self: Connection,
-            id: u32,
-            deprecated_since: ?u32,
-            since: u32,
-        ) !void {
-            for (self.proxies.items) |proxy| {
-                if (proxy.id == id) {
-                    if (proxy.version < since)
-                        return error.InvalidRequest;
-                    if (deprecated_since) |ds| if (proxy.version > ds)
-                        return error.Deprecated;
-                }
-            }
-        }
-    };
     pub const IdAllocator = struct {
+        context: *anyopaque,
+        vtable: VTable,
+
+        pub fn alloc(self: IdAllocator) error{OutOfIds}!u32 {
+            return self.vtable.alloc(self.context);
+        }
+
+        pub fn free(self: IdAllocator, id: u32) error{ OutOfMemory, ImplementationSpecific }!void {
+            return self.vtable.free(self.context, id);
+        }
+
+        pub const VTable = struct {
+            alloc: *const fn (*anyopaque) error{OutOfIds}!u32,
+            free: *const fn (*anyopaque, u32) error{ OutOfMemory, ImplementationSpecific }!void,
+        };
+    };
+
+    pub const ClientIdAllocator = struct {
         next_id: u32,
-        pub fn alloc(self: *IdAllocator) !u32 {
+        free_list: std.ArrayList(u32),
+        options: InitOptions,
+        gpa: std.mem.Allocator,
+
+        pub const InitOptions = struct {
+            initial_capacity: usize = 8,
+            warn_unfree_ids: ?usize = null,
+        };
+
+        pub fn init(gpa: std.mem.Allocator, options: InitOptions) error{OutOfMemory}!ClientIdAllocator {
+            return .{
+                .next_id = 1,
+                .free_list = try .initCapacity(alloc, options.initial_capacity),
+                .options = options,
+                .gpa = gpa,
+            };
+        }
+
+        pub fn deinit(self: *ClientIdAllocator, gpa: std.mem.Allocator) void {
+            const unfree_count = self.free_list.items.len;
+            if (self.options.warn_unfree_ids) |max_count| if (unfree_count >= max_count) {
+                const log = std.log.scoped(.client_id_allocator);
+                log.err("Too many unfree ids: {d} (configured max: {d}).", .{ unfree_count, max_count });
+                for (self.free_list.items) |id| log.err("Id {d} not freed.", .{id});
+            };
+            self.free_list.deinit(gpa);
+        }
+
+        pub fn allocator(self: *ClientIdAllocator) IdAllocator {
+            return .{
+                .context = self,
+                .vtable = .{
+                    .alloc = alloc,
+                    .free = free,
+                },
+            };
+        }
+
+        fn alloc(self: *ClientIdAllocator) error{ OutOfIds, ImplementationSpecific }!u32 {
+            defer self.next_id += 1;
             return self.next_id;
         }
-    };
-    const Proxy = struct {
-        id: u32,
-        version: u32,
-        interface: []const u8,
+
+        fn free(self: *ClientIdAllocator, id: u32) error{ OutOfMemory, ImplementationSpecific }!void {
+            try self.free_list.append(self.gpa, id);
+        }
     };
 };
-
 pub const protocol = struct {
+    pub const libwayland_message_max_length = 4096;
+    pub const libwayland_message_max_args = 20;
     pub const wayland = struct {
-        pub const Display = enum(u32) {
-            _,
+        pub const Display = struct {
+            id: u32,
+            connection_fd: i32,
 
             pub const interface = "wl_display";
             pub const Version = enum { v1 };
 
+            pub const sync_request_opcode = 0;
+            pub const sync_request_length = 12;
+
+            pub fn serializeSync(
+                self: Display,
+                buf: *[sync_request_length]u8,
+                callback: u32,
+            ) !void {
+                _ = self;
+                _ = buf;
+                _ = callback;
+            }
+
             pub fn sync(
                 self: Display,
                 connection: zwl.Connection,
-                ida: *zwl.IdAllocator,
+                ida: zwl.IdAllocator,
             ) !Callback {
                 _ = self;
                 _ = connection;
                 return @enumFromInt(try ida.alloc());
             }
+
+            pub const get_registry_request_opcode = 1;
+            pub const get_registry_request_length = 12;
 
             pub fn getRegistry(
                 self: Display,
