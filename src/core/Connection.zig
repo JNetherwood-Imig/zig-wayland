@@ -4,7 +4,17 @@ handle: std.posix.fd_t,
 
 pub fn connect(info: ConnectInfo) ConnectError!Connection {
     const handle = conn: switch (info) {
-        .socket => |socket| socket,
+        .socket => |fd| fd: {
+            switch (posix.errno(std.os.linux.fcntl(fd, std.os.linux.F.GETFD, 0))) {
+                .SUCCESS => {
+                    const stat = try posix.fstat(fd);
+                    if (!posix.S.ISSOCK(stat.mode)) return error.InvalidWaylandSocket;
+                },
+                .BADF => return error.InvalidWaylandSocket,
+                else => |e| return std.posix.unexpectedErrno(e),
+            }
+            break :fd fd;
+        },
         .name => |name| handle: {
             const xdg_runtime_dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse
                 return error.NoXdgRuntimeDir;
@@ -61,6 +71,7 @@ pub fn sendMessageWithFds(
 }
 
 pub const ConnectError = error{
+    InvalidWaylandSocket,
     NoXdgRuntimeDir,
     NameTooLong,
 } || std.posix.ConnectError || std.posix.SocketError;

@@ -3,8 +3,11 @@ const zwl = @import("zwl");
 const wl = zwl.protocol.wayland;
 const xdg = zwl.protocol.xdg_shell;
 const Allocator = std.mem.Allocator;
+
 const pixel_size = @sizeOf(u32);
 const pixel_format = wl.Shm.Format.xrgb8888;
+const pixels_per_frame = 24;
+
 const State = @This();
 
 conn: zwl.Connection,
@@ -21,19 +24,22 @@ surface: wl.Surface,
 xdg_surface: xdg.Surface,
 toplevel: xdg.Toplevel,
 
-buffer: wl.Buffer,
-data: []align(4096) u8,
+buffer: wl.Buffer = @enumFromInt(0),
+data: []align(4096) u8 = &.{},
 
-width: u32,
-height: u32,
+width: u32 = 1280,
+height: u32 = 720,
+
+offset: f32 = 0,
+last_frame: u32 = 0,
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
-    var id_buf: [16]u32 = undefined;
-    var ida_state = zwl.FixedBufferIdAllocator.init(&id_buf);
+    var ida_state = try zwl.DynamicIdAllocator.init(gpa, .{});
+    defer ida_state.deinit();
     const ida = ida_state.allocator();
 
     var state = try init(gpa, ida);
@@ -127,10 +133,6 @@ fn init(gpa: Allocator, ida: zwl.IdAllocator) !State {
         .surface = surface,
         .xdg_surface = xdg_surface,
         .toplevel = toplevel,
-        .buffer = @enumFromInt(0),
-        .data = &.{},
-        .width = 1280,
-        .height = 720,
     };
 }
 
@@ -167,11 +169,19 @@ fn run(self: *State, gpa: Allocator) !void {
             if (cb == close_callback) break;
 
             // Assume surface frame callback
+            const time = ev.done.callback_data;
             try self.handler.delObject(cb);
             const new_cb = try self.surface.frame(&self.conn, self.ida);
             try self.handler.addObject(gpa, new_cb);
 
+            if (self.last_frame != 0) {
+                const elapsed = time - self.last_frame;
+                self.offset += @as(f32, @floatFromInt(elapsed)) / std.time.ms_per_s * pixels_per_frame;
+            }
+
             try self.drawFrame();
+
+            self.last_frame = time;
         },
         .wl_buffer => |ev| {
             try ev.release.wl_buffer.destroy(&self.conn);
@@ -252,9 +262,10 @@ fn resize(self: *State) !void {
 fn drawFrame(self: *State) !void {
     const pixels = std.mem.bytesAsSlice(u32, self.data);
 
+    const offset = @as(u32, @intFromFloat(self.offset)) % 8;
     for (0..self.height) |y| {
         for (0..self.width) |x| {
-            pixels[y * self.width + x] = if ((x + y / 8 * 8) % 16 < 8)
+            pixels[y * self.width + x] = if (((x + offset) + (y + offset) / 8 * 8) % 16 < 8)
                 0xFF666666
             else
                 0xFFEEEEEE;
