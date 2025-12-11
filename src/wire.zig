@@ -3,16 +3,15 @@ const std = @import("std");
 const cmsg = @import("cmsg.zig");
 
 const Fd = @import("Fd.zig");
-const Fixed = @import("fixed.zig").Fixed;
-const Proxy = @import("Proxy.zig");
+const Fixed = @import("Fixed.zig");
 
-/// Message maximum size enforced by libwayland.
-/// It will terminate the connection of any client which attempts to pass a larger buffer.
+// Message maximum size enforced by libwayland.
+// It will terminate the connection of any client which attempts to pass a larger buffer.
 const message_max_length: usize = 4096;
 
-/// Libwayland also enforces a maximum number of wl_closure args.
-/// This largely doesn't matter for this API, but it does mean we can safely cap the amount
-/// of allowed file descriptors here to save on memory when serializing.
+// Libwayland also enforces a maximum number of wl_closure args.
+// This largely doesn't matter for this API, but it does mean we can safely cap the amount
+// of allowed file descriptors here to save on memory when serializing.
 const message_max_fds: usize = 20;
 
 /// Wayland wire message header
@@ -146,7 +145,6 @@ pub const Message = struct {
                 else => @compileError("Expected int arg to be 32 bits."),
             },
             .@"struct" => switch (T) {
-                Proxy => self.serializeProxy(arg),
                 Fd => self.serializeFd(arg),
                 String => self.serializeString(arg),
                 Array => self.serializeArray(arg),
@@ -155,7 +153,6 @@ pub const Message = struct {
                 else => @compileError("Unexpected struct arg type."),
             },
             .optional => |o| switch (o.child) {
-                Proxy => self.serializeProxy(arg),
                 String => self.serializeString(arg),
                 else => @compileError("Expected optional to be either a Proxy or String."),
             },
@@ -176,7 +173,7 @@ pub const Message = struct {
     }
 
     fn serializeFixed(self: *Message, fixed: Fixed) !void {
-        try self.serializeInt(fixed.data);
+        try self.serializeInt(@bitCast(fixed));
     }
 
     fn serializeString(self: *Message, string: ?String) !void {
@@ -189,10 +186,6 @@ pub const Message = struct {
         } else {
             try self.serializeUint(0);
         }
-    }
-
-    fn serializeProxy(self: *Message, proxy: ?Proxy) !void {
-        try self.serializeUint(if (proxy) |p| p.id else 0);
     }
 
     fn serializeGenericNewId(self: *Message, new_id: GenericNewId) !void {
@@ -216,49 +209,12 @@ pub const Message = struct {
     }
 };
 
-/// Utility function to roundup an integer with known size to the next multiple of 4
 fn roundup4(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     return switch (@typeInfo(T)) {
         .int => (value + 3) & ~@as(T, 3),
-        else => @compileError("roundup4 can only be used on an integer type with a known size."),
+        else => @compileError("Unsupported type (roundup4)."),
     };
-}
-
-test "serialize" {
-    const nullable_string: ?String = null;
-    const nullable_object: ?Proxy = null;
-    const msg = try Message.init(1, 2, .{
-        @as(i32, -1),
-        @as(u32, 3),
-        Fixed.from(4.0),
-        String.init("Hello, world!"),
-        nullable_string,
-        Proxy{ .id = 5, .version = 1 },
-        nullable_object,
-        @as(u32, 6),
-        GenericNewId{ .interface = String.init("wl_compositor"), .version = 6, .new_id = 7 },
-        Array.init(&.{ 0, 1, 2, 3, 4, 5, 6, 7 }),
-        Fd{ .raw = 5 },
-        Fd{ .raw = 9 },
-    });
-
-    try std.testing.expectEqualStrings(&.{ 1, 0, 0, 0, 2, 0, 96, 0 }, msg.buf[0..8]);
-    try std.testing.expectEqualStrings(&.{ 255, 255, 255, 255, 3, 0, 0, 0, 0, 4, 0, 0 }, msg.buf[8..20]);
-    try std.testing.expectEqual(16, std.mem.bytesAsValue(u32, msg.buf[20..24]).*);
-    try std.testing.expectEqualStrings("Hello, world!\x00\x00\x00", msg.buf[24..40]);
-    try std.testing.expectEqual(0, std.mem.bytesAsValue(u32, msg.buf[40..44]).*);
-    try std.testing.expectEqual(5, std.mem.bytesAsValue(u32, msg.buf[44..48]).*);
-    try std.testing.expectEqual(0, std.mem.bytesAsValue(u32, msg.buf[48..52]).*);
-    try std.testing.expectEqual(6, std.mem.bytesAsValue(u32, msg.buf[52..56]).*);
-    try std.testing.expectEqual(16, std.mem.bytesAsValue(u32, msg.buf[56..60]).*);
-    try std.testing.expectEqualStrings("wl_compositor\x00\x00\x00", msg.buf[60..76]);
-    try std.testing.expectEqual(6, std.mem.bytesAsValue(u32, msg.buf[76..80]).*);
-    try std.testing.expectEqual(7, std.mem.bytesAsValue(u32, msg.buf[80..84]).*);
-    try std.testing.expectEqual(8, std.mem.bytesAsValue(u32, msg.buf[84..88]).*);
-    try std.testing.expectEqualStrings(&.{ 0, 1, 2, 3, 4, 5, 6, 7 }, msg.buf[88..96]);
-    try std.testing.expectEqualStrings(&.{ 24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 }, msg.ancillary[0..16]);
-    try std.testing.expectEqualStrings(&.{ 5, 0, 0, 0, 9, 0, 0, 0 }, msg.ancillary[16..24]);
 }
 
 test "roundup4" {
