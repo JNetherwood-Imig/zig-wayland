@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests.");
     test_step.dependOn(&run_test.step);
 
-    addProtocols(b, target, optimize, core, test_step);
+    addProtocols(b, target, optimize, core, test_step, doc_step);
 }
 
 fn makeScanner(
@@ -54,30 +54,46 @@ fn addProtocols(
     optimize: std.builtin.OptimizeMode,
     core: *std.Build.Module,
     test_step: *std.Build.Step,
+    doc_step: *std.Build.Step,
 ) void {
     const core_dep = b.dependency("wayland", .{});
     const protocols_dep = b.dependency("wayland_protocols", .{});
     const scanner = makeScanner(b, target, optimize);
+
     inline for (.{ "client", "server" }) |mode| {
         const run_scanner = b.addRunArtifact(scanner);
+
         run_scanner.addArgs(&.{ "-m", mode });
+
         run_scanner.addArg("-o");
         const output_file = run_scanner.addOutputFileArg(mode ++ "-" ++ "protocol" ++ ".zig");
+
         run_scanner.addArgs(&.{ "-p", "wl_" });
         run_scanner.addFileArg(core_dep.path("protocol/wayland.xml"));
+
         for (wayland_protocols_paths) |protocol| {
             run_scanner.addArgs(&.{ "-p", protocol.prefix });
             run_scanner.addFileArg(protocols_dep.path(protocol.path));
         }
+
         const mod = b.addModule(mode ++ "-" ++ "protocol", .{
             .target = target,
             .optimize = optimize,
             .root_source_file = output_file,
         });
         mod.addImport("core", core);
+
         const mod_test_exe = b.addTest(.{ .root_module = mod });
         const run_mod_test = b.addRunArtifact(mod_test_exe);
         test_step.dependOn(&run_mod_test.step);
+
+        const doc_obj = b.addObject(.{ .name = mode ++ "_protocol", .root_module = mod });
+        const install_doc = b.addInstallDirectory(.{
+            .source_dir = doc_obj.getEmittedDocs(),
+            .install_dir = .prefix,
+            .install_subdir = "docs/" ++ mode,
+        });
+        doc_step.dependOn(&install_doc.step);
     }
 }
 
