@@ -94,6 +94,7 @@ pub fn main() !void {
                 try surf.attach(&conn, buffer, 0, 0);
             }
             try surf.commit(&conn);
+            configured = true;
         },
         .xdg_toplevel => |ev| switch (ev) {
             .close => break,
