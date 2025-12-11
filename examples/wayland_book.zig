@@ -145,20 +145,21 @@ const State = struct {
             .xdg_surface => |ev| {
                 try self.xdg_surface.ackConfigure(&self.conn, ev.configure.serial);
 
-                if (self.data.len == 0)
+                if (self.data.len == 0) {
                     try self.resize();
 
-                try self.drawFrame();
+                    try self.drawFrame();
+                }
             },
             .xdg_toplevel => |ev| switch (ev) {
                 .configure => |config| {
                     if (config.width == 0 or config.height == 0) continue;
 
                     if (config.width != self.width or config.height != self.height) {
-                        std.posix.munmap(self.data);
+                        //     std.posix.munmap(self.data);
                         self.width = @intCast(config.width);
                         self.height = @intCast(config.height);
-                        try self.resize();
+                        //     try self.resize();
                     }
                 },
                 .configure_bounds => |bounds| std.log.info(
