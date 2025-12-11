@@ -1,7 +1,7 @@
 const Entry = @This();
 
 name: []const u8,
-value: u32,
+value: i32,
 summary: ?[]const u8,
 since: u32,
 deprecated_since: ?u32,
@@ -13,7 +13,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Entry {
     var summary: ?[]const u8 = null;
     errdefer if (summary) |s| gpa.free(s);
 
-    var value: ?u32 = null;
+    var value: ?i32 = null;
     var since: ?u32 = null;
     var deprecated_since: ?u32 = null;
 
@@ -30,9 +30,9 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Entry {
         else if (std.mem.eql(u8, attrib, "value")) {
             const raw_value = reader.attributeValueRaw(i);
             value = if (std.mem.startsWith(u8, raw_value, "0x"))
-                try std.fmt.parseInt(u32, raw_value[2..], 16)
+                try std.fmt.parseInt(i32, raw_value[2..], 16)
             else
-                try std.fmt.parseInt(u32, raw_value, 10);
+                try std.fmt.parseInt(i32, raw_value, 10);
         } else return error.UnexpectedAttribute;
     }
 

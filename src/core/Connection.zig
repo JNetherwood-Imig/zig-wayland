@@ -34,7 +34,6 @@ pub fn close(self: *Connection) void {
 pub fn sendMessage(self: *Connection, buffer: []const u8) !void {
     const header = std.mem.bytesAsValue(wire.Header, buffer[0..8]);
     _ = try posix.send(self.handle, buffer[0..header.length], 0);
-    log.debug("Sent {any}.", .{buffer[0..header.length]});
 }
 
 pub fn sendMessageWithFds(

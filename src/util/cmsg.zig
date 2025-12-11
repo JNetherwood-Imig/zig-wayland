@@ -51,14 +51,14 @@ pub inline fn dataConst(cmsg: *const Header) []const u8 {
     return data_ptr[0..len];
 }
 
-pub inline fn firstHeader(message: *posix.msghdr) ?*Header {
+pub inline fn firstHeader(message: *const posix.msghdr) ?*const Header {
     return if (message.controllen >= @sizeOf(Header) and message.control != null)
-        @as(*Header, @ptrCast(@alignCast(message.control.?)))
+        @as(*const Header, @ptrCast(@alignCast(message.control.?)))
     else
         null;
 }
 
-pub inline fn nextHeader(message: *posix.msghdr, cmsg: *const Header) ?*Header {
+pub inline fn nextHeader(message: *const posix.msghdr, cmsg: *const Header) ?*const Header {
     if (message.control == null or cmsg.cmsg_len < @sizeOf(Header)) return null;
 
     const control_ptr = @as(usize, @intFromPtr(message.control.?));
@@ -69,7 +69,7 @@ pub inline fn nextHeader(message: *posix.msghdr, cmsg: *const Header) ?*Header {
         control_ptr + message.controllen - cmsg_ptr - size_needed < cmsg.cmsg_len)
         return null;
 
-    return @as(*Header, @ptrFromInt(cmsg_ptr + @"align"(cmsg.cmsg_len)));
+    return @as(*const Header, @ptrFromInt(cmsg_ptr + @"align"(cmsg.cmsg_len)));
 }
 
 test "cmsg align" {

@@ -41,7 +41,7 @@ pub const GenericNewId = struct {
 
     pub fn init(comptime T: type, version: T.Version, new_id: u32) GenericNewId {
         return .{
-            .interface = .init(T.interface),
+            .interface = String.init(T.interface).?,
             .version = @intFromEnum(version),
             .new_id = new_id,
         };
@@ -74,15 +74,63 @@ pub fn serializeArgs(
     return length;
 }
 
+pub fn deserializeEventType(
+    comptime T: type,
+    bytes: []const u8,
+    msg: *const std.posix.msghdr,
+) T {
+    const signature = T._signature;
+
+    const fd_count = comptime blk: {
+        var count: usize = 0;
+        for (signature) |byte| {
+            if (byte == 'd') count += 1;
+        }
+        break :blk count;
+    };
+
+    var fds: [fd_count]i32 = undefined;
+    var fd_index: usize = 0;
+    var hdr = cmsg.firstHeader(msg);
+    while (hdr) |h| {
+        const data = std.mem.bytesAsSlice(i32, cmsg.dataConst(h));
+        @memcpy(&fds, data);
+        fd_index += data.len;
+        hdr = cmsg.nextHeader(msg, h);
+    }
+
+    var event: T = undefined;
+    var index: usize = 0;
+    fd_index = 0;
+    switch (@typeInfo(T)) {
+        .@"struct" => |s| inline for (s.fields[1..], 0..) |field, sig_index| {
+            const sig_byte = signature[sig_index];
+            if (sig_byte != 'd') {
+                const val, const size = deserializeArg(field.type, sig_byte, bytes[index..]);
+                @field(event, field.name) = val;
+                index += size;
+            } else {
+                @field(event, field.name) = fds[fd_index];
+                fd_index += 1;
+            }
+        },
+        else => @compileError("Expected args to be a struct or tuple."),
+    }
+
+    return event;
+}
+
 const std = @import("std");
+const util = @import("util");
 const Fixed = @import("Fixed.zig");
+const cmsg = util.cmsg;
 
 fn calculateArgsLength(args: anytype) u16 {
     var length: u16 = 8;
     inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
         switch (field.type) {
             String, Array => length += @field(args, field.name).padded_len,
-            GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 8)),
+            GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 12)),
             else => length += 4,
         }
     }
@@ -129,7 +177,7 @@ fn serializeFixed(buffer: []u8, fixed: Fixed) usize {
 
 fn serializeString(buffer: []u8, string: ?String) usize {
     if (string) |s| {
-        const written = serializeUint(buffer, @intCast(s.padded_len));
+        const written = serializeUint(buffer, @intCast(s.data.len + 1));
         @memcpy(buffer[written .. written + s.data.len], s.data);
         buffer[written + s.data.len] = 0;
         return written + s.padded_len;
@@ -145,9 +193,72 @@ fn serializeGenericNewId(buffer: []u8, new_id: GenericNewId) usize {
 }
 
 fn serializeArray(buffer: []u8, array: Array) usize {
-    const written = serializeUint(buffer, @intCast(array.padded_len));
+    const written = serializeUint(buffer, @intCast(array.data.len));
     @memcpy(buffer[written .. written + array.data.len], array.data);
     return written + array.padded_len;
+}
+
+fn deserializeArg(comptime T: type, comptime sig_byte: u8, bytes: []const u8) struct { T, usize } {
+    switch (@typeInfo(T)) {
+        .int => {
+            comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u');
+            const val = std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
+            return .{ val, @sizeOf(T) };
+        },
+        .@"struct" => switch (sig_byte) {
+            'f' => {
+                const val = Fixed{ .data = std.mem.bytesToValue(i32, bytes[0..@sizeOf(i32)]) };
+                return .{ val, @sizeOf(i32) };
+            },
+            'u' => {
+                const val = @as(T, @bitCast(std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)])));
+                return .{ val, @sizeOf(u32) };
+            },
+            else => unreachable,
+        },
+        .@"enum" => |e| {
+            comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
+            // TODO: handle new ids
+            const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
+            return .{ val, @sizeOf(e.tag_type) };
+        },
+        .pointer => |p| {
+            const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
+            if (p.sentinel_ptr != null) {
+                const val: [:0]const u8 = @ptrCast(bytes[4 .. len + 3]);
+                return .{ val, roundup4(len) + @sizeOf(u32) };
+            } else {
+                const val: []const u8 = bytes[4 .. len + 4];
+                return .{ val, roundup4(len) + @sizeOf(u32) };
+            }
+        },
+        .optional => |o| {
+            switch (@typeInfo(o.child)) {
+                .@"enum" => |e| {
+                    comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
+                    // TODO: handle new ids
+                    const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
+                    return .{ val, @sizeOf(e.tag_type) };
+                },
+                .pointer => |p| {
+                    const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
+                    if (p.sentinel_ptr != null) {
+                        const val: [:0]const u8 = @ptrCast(bytes[0 .. len - 1]);
+                        return .{ val, len + @sizeOf(u32) };
+                    } else {
+                        const val: []const u8 = bytes[0..len];
+                        return .{ val, len + @sizeOf(u32) };
+                    }
+                },
+                else => {
+                    @compileError(std.fmt.comptimePrint("Unexpected optional type: {s}", .{@typeName(T)}));
+                },
+            }
+        },
+        else => {
+            @compileError(std.fmt.comptimePrint("Unexpected type: {s}", .{@typeName(T)}));
+        },
+    }
 }
 
 fn roundup4(value: anytype) @TypeOf(value) {

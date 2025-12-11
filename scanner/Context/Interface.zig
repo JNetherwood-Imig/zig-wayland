@@ -106,7 +106,7 @@ pub fn write(
     try writer.writeAll("\t\t_,\n");
     try writer.print("\t\tpub const interface = \"{s}\";\n", .{self.name});
     try writer.writeAll("\t\tpub const Version = enum(u32) {\n");
-    for (0..self.version) |v| try writer.print("\t\t\tv{d},\n", .{v + 1});
+    for (0..self.version) |v| try writer.print("\t\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
     try writer.writeAll("\t\t};\n");
     try writer.print(
         "\t\tpub fn getId(self: {s}) u32 {{\n\t\t\treturn @intFromEnum(self);\n\t\t}}\n",
@@ -118,6 +118,9 @@ pub fn write(
 
     for (self.events.items, 0..) |event, opcode|
         try event.write(gpa, writer, map, self.name, opcode);
+
+    for (self.enums.items) |en|
+        try en.write(gpa, writer);
 
     try writer.writeAll("\t};\n");
 }

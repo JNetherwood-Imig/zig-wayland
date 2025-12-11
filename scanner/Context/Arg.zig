@@ -13,12 +13,12 @@ const Type = union(enum) {
     optional_string: void,
     array: void,
     fd: void,
+    object: []const u8,
+    optional_object: []const u8,
     any_object: void,
     any_optional_object: void,
     any_new_id: void,
     @"enum": []const u8,
-    object: []const u8,
-    optional_object: []const u8,
     new_id: []const u8,
 
     fn resolve(str: []const u8, allow_null: bool, interface: ?[]const u8, en: ?[]const u8) !Type {
@@ -117,18 +117,30 @@ pub fn deinit(self: *Arg, gpa: Allocator) void {
     }
 }
 
-pub fn write(self: *const Arg, writer: *std.Io.Writer, map: *const InterfaceMap) !void {
+pub fn write(self: *const Arg, gpa: Allocator, writer: *std.Io.Writer, map: *const InterfaceMap) !void {
     try writer.print("\t\t\t{s}: ", .{self.name});
-    try self.writeTypeString(writer, map);
+    try self.writeTypeString(gpa, writer, map);
 }
 
 fn writeTypeString(
     self: *const Arg,
+    gpa: Allocator,
     writer: *std.Io.Writer,
     map: *const InterfaceMap,
 ) !void {
     if (self.type == .@"enum") {
-        try writer.writeAll("u32"); // TODO
+        if (std.mem.indexOfScalar(u8, self.type.@"enum", '.')) |idx| {
+            const interface = self.type.@"enum"[0..idx];
+            const entry = try map.get(interface);
+            const name = self.type.@"enum"[idx + 1 ..];
+            const type_name = try util.snakeToPascal(gpa, name);
+            defer gpa.free(type_name);
+            try writer.print("{s}.{s}.{s}", .{ entry.protocol, entry.type_name, type_name });
+        } else {
+            const name = try util.snakeToPascal(gpa, self.type.@"enum");
+            defer gpa.free(name);
+            try writer.print("{s}", .{name});
+        }
     } else if (self.type == .object) {
         const entry = try map.get(self.type.object);
         try writer.print("{s}.{s}", .{ entry.protocol, entry.type_name });
@@ -157,6 +169,7 @@ fn writeTypeString(
 
 const std = @import("std");
 const xml = @import("xml");
+const util = @import("util.zig");
 const InterfaceMap = @import("InterfaceMap.zig");
 const Description = @import("Description.zig");
 const Allocator = std.mem.Allocator;
