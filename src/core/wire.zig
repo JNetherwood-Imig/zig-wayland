@@ -1,3 +1,5 @@
+const cmsg = @import("cmsg.zig");
+
 /// Wayland wire message header
 pub const Header = extern struct {
     object: u32,
@@ -121,9 +123,7 @@ pub fn deserializeEventType(
 }
 
 const std = @import("std");
-const util = @import("util");
 const Fixed = @import("Fixed.zig");
-const cmsg = util.cmsg;
 
 fn calculateArgsLength(args: anytype) u16 {
     var length: u16 = 8;

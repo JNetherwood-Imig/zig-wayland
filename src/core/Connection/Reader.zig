@@ -1,14 +1,14 @@
 const std = @import("std");
-const cmsg = @import("cmsg.zig");
+const cmsg = @import("../cmsg.zig");
 const wire = @import("../wire.zig");
 const posix = std.posix;
-const Buffer = @import("Buffer.zig");
+const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const Reader = @This();
 
 socket: posix.fd_t,
-data: Buffer,
-fds: Buffer,
+data: RingBuffer(u8),
+fds: RingBuffer(posix.fd_t),
 
 pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Reader {
     return .{

@@ -126,5 +126,6 @@ const std = @import("std");
 const core = @import("core");
 const wire = core.wire;
 const log = std.log.scoped(.wayland_client);
+const cmsg = @import("cmsg.zig");
 const Allocator = std.mem.Allocator;
 const Connection = core.Connection;
