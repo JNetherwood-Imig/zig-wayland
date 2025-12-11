@@ -1,6 +1,6 @@
 const Connection = @This();
 
-handle: Fd,
+handle: std.posix.fd_t,
 
 pub fn connect(info: ConnectInfo) ConnectError!Connection {
     const handle = conn: switch (info) {
@@ -15,11 +15,11 @@ pub fn connect(info: ConnectInfo) ConnectError!Connection {
                 .{ xdg_runtime_dir, name },
             ) catch return error.NameTooLong;
             const socket = try std.net.connectUnixSocket(path);
-            break :handle Fd.initUnchecked(socket.handle);
+            break :handle socket.handle;
         },
         .path => |path| handle: {
             const socket = try std.net.connectUnixSocket(path);
-            break :handle Fd.initUnchecked(socket.handle);
+            break :handle socket.handle;
         },
         .fallback => continue :conn .{ .name = "wayland-0" },
     };
@@ -27,7 +27,7 @@ pub fn connect(info: ConnectInfo) ConnectError!Connection {
 }
 
 pub fn close(self: Connection) void {
-    self.handle.close();
+    std.posix.close(self.handle);
 }
 
 pub fn sendMessage(
@@ -65,7 +65,7 @@ pub const ConnectError = error{
 } || std.posix.ConnectError || std.posix.SocketError;
 
 pub const ConnectInfo = union(enum) {
-    socket: Fd,
+    socket: i32,
     name: []const u8,
     path: []const u8,
     fallback: void,
@@ -73,7 +73,7 @@ pub const ConnectInfo = union(enum) {
     pub fn default() ConnectInfo {
         if (std.posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
             if (std.fmt.parseInt(i32, wayland_socket, 10)) |raw_fd| {
-                if (Fd.init(raw_fd)) |fd| return .{ .socket = fd } else |_| {}
+                return .{ .socket = raw_fd }; // TODO validate fd
             } else |_| {}
         }
         if (std.posix.getenv("WAYLAND_DISPLAY")) |wayland_display| {
@@ -112,9 +112,9 @@ pub const ConnectInfo = union(enum) {
 };
 
 const std = @import("std");
-const wire = @import("wire.zig");
-const cmsg = @import("cmsg.zig");
+const util = @import("util");
 const log = std.log.scoped(.wayland);
 const posix = std.posix;
-const Fd = @import("Fd.zig");
+const wire = util.wire;
+const cmsg = util.cmsg;
 const Writer = std.Io.Writer;

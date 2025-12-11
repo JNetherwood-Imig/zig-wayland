@@ -1,3 +1,5 @@
+const IdAllocator = @This();
+
 context: *anyopaque,
 vtable: VTable,
 
@@ -29,4 +31,3 @@ pub inline fn free(self: IdAllocator, id: u32) FreeError!void {
 }
 
 const std = @import("std");
-const IdAllocator = @This();

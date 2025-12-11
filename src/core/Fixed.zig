@@ -1,5 +1,3 @@
-const std = @import("std");
-const testing = std.testing;
 const Fixed = @This();
 
 data: i32,
@@ -23,6 +21,9 @@ pub fn to(self: Fixed, comptime T: type) T {
 pub fn formatNumber(self: Fixed, writer: *std.io.Writer, number: std.fmt.Number) !void {
     try writer.printFloat(self.to(f64), number);
 }
+
+const std = @import("std");
+const testing = std.testing;
 
 test "to/from int" {
     try testing.expectEqual(0, Fixed.from(0).to(i32));

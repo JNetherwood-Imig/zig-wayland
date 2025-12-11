@@ -109,13 +109,21 @@ fn writeNormal(
     parent_interface: []const u8,
     fn_name: []const u8,
 ) !void {
+    const fd_count = count: {
+        var count: usize = 0;
+        for (self.args.items) |arg| {
+            if (arg.type == .fd) count += 1;
+        }
+        break :count count;
+    };
+
     try writer.print("\t\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\t\tconnection: *Connection,\n");
     for (self.args.items) |arg| try arg.write(writer, map);
     try writer.writeAll("\t\t) !void {\n");
-    try writer.writeAll("\t\t\t_ = connection;\n");
-    for (self.args.items) |arg| try writer.print("\t\t\t_ = {s};\n", .{arg.name});
+    for (self.args.items) |arg| if (arg.type != .fd)
+        try writer.print("\t\t\t_ = {s};\n", .{arg.name});
     try writer.print(
         "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
@@ -124,6 +132,18 @@ fn writeNormal(
         "\t\t\ttry self.serialize{c}{s}(&message_buffer);\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
+    if (fd_count > 0) {
+        try writer.print(
+            "\t\t\ttry connection.sendMessageWithFds(&message_buffer, {d}, &.{{\n",
+            .{fd_count},
+        );
+        for (self.args.items) |arg| {
+            if (arg.type == .fd) try writer.print("\t\t\t\t{s},\n", .{arg.name});
+        }
+        try writer.writeAll("\t\t\t});\n");
+    } else {
+        try writer.writeAll("\t\t\ttry connection.sendMessage(&message_buffer);\n");
+    }
     try writer.writeAll("\t\t}\n");
 }
 
@@ -148,7 +168,8 @@ fn writeConstructor(
     try writer.print("\t\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
     try writer.writeAll("\t\t\t_ = self;\n\t\t\t_ = connection;\n");
-    for (self.args.items) |arg| if (arg.type != .new_id) try writer.print("\t\t\t_ = {s};\n", .{arg.name});
+    for (self.args.items) |arg| if (arg.type != .new_id)
+        try writer.print("\t\t\t_ = {s};\n", .{arg.name});
     try writer.print(
         "\t\t\tconst new_{s} = try ida.create({s}.{s});\n",
         .{ return_arg.name, entry.protocol, entry.type_name },
@@ -164,10 +185,19 @@ fn writeAnyConstructor(
     parent_interface: []const u8,
     fn_name: []const u8,
 ) !void {
+    _ = self;
     _ = map;
-    _ = parent_interface;
-    std.debug.print("Writing any constructor for {s}.\n", .{self.name});
-    try writer.print("\t\tpub fn {s}() void {{}}", .{fn_name});
+    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
+    try writer.print("\t\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\t\tcomptime Interface: type,\n");
+    try writer.writeAll("\t\t\tversion: Interface.Version,\n");
+    try writer.writeAll("\t\t\tconnection: *Connection,\n");
+    try writer.writeAll("\t\t\tida: IdAllocator,\n");
+    try writer.writeAll("\t\t) !Interface {\n");
+    try writer.writeAll("\t\t\t_ = self;\n\t\t\t_ = version;\n\t\t\t_ = connection;\n");
+    try writer.writeAll("\t\t\tconst new_id = try ida.create(Interface);\n");
+    try writer.writeAll("\t\t\treturn new_id;\n");
+    try writer.writeAll("\t\t}\n");
 }
 
 fn writeSerialize(

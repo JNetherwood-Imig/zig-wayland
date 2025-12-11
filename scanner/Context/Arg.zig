@@ -121,7 +121,7 @@ pub fn write(self: *const Arg, writer: *std.Io.Writer, map: *const InterfaceMap)
     if (self.type == .new_id) return;
     if (self.type == .any_new_id) return writeAnyNewId(writer);
 
-    try writer.print("\t\t\t\t{s}: ", .{self.name});
+    try writer.print("\t\t\t{s}: ", .{self.name});
     try self.writeTypeString(writer, map);
 }
 
