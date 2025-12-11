@@ -1,0 +1,13 @@
+.{
+    .name = .denali,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "scanner",
+        "src",
+        "examples",
+        "build.zig",
+        "build.zig.zon",
+    },
+    .fingerprint = 0x1cbfc8a28fc8c10e,
+}
