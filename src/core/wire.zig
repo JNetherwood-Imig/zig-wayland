@@ -151,7 +151,7 @@ fn serializeArg(buffer: []u8, arg: anytype) usize {
             Array => serializeArray(buffer, arg),
             GenericNewId => serializeGenericNewId(buffer, arg),
             Fixed => serializeFixed(buffer, arg),
-            else => @compileError("Unexpected struct arg type."),
+            else => serializeUint(buffer, @bitCast(arg)),
         },
         .@"enum" => |e| switch (e.tag_type) {
             i32 => serializeInt(buffer, @intFromEnum(arg)),

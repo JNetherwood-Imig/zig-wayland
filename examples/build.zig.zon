@@ -12,5 +12,13 @@
 
     .dependencies = .{
         .wayland = .{ .path = ".." },
+        .vulkan = .{
+            .url = "git+https://github.com/Snektron/vulkan-zig.git#f69af7a9248982cf7536aaf32111843f1a4fa4a9",
+            .hash = "vulkan-0.0.0-r7Ytx91DAwDKIXS2K_fFa-c_SJ5py7K1eCKwPcc33NcQ",
+        },
+        .vulkan_headers = .{
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.333.tar.gz",
+            .hash = "N-V-__8AALj9EAIkFPEMcEwh8aSDDbjiALa-naw9gnmuF5Tr",
+        },
     },
 }

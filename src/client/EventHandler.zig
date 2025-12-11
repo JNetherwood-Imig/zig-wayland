@@ -34,8 +34,8 @@ pub fn delObject(self: *EventHandler, object: anytype) !void {
     return error.ObjectNotFound;
 }
 
-pub fn getNextEvent(self: *const EventHandler, connection: *Connection) !?protocol.Event {
-    return self.waitNextEventTimeout(connection, 0);
+pub fn getNextEvent(self: *const EventHandler, connection: *Connection, buf: []u8) !?protocol.Event {
+    return self.waitNextEventTimeout(connection, 0, buf);
 }
 
 pub fn waitNextEvent(self: *const EventHandler, connection: *Connection, buf: []u8) !protocol.Event {
