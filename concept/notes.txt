@@ -1,0 +1,8 @@
+In the following example, the generation of xdg shell will be invoked using a separate command than the generation of wayland.
+Since each protocol is generated separately, but the dependency web is annoying, one pass will have to be performed to generate all dependency information, then the main pass will generate code.
+The scanner will be given a -i <path/to/protocol.dep> to import the protocol definitions for every protocol that the currently generated one depends on.
+For generating many protocols, there can be -I <path/to/dir> to get many protocol definitions. This will mean the interface map is only based on imported dependencies. Thus, the order for performing a dependency lookup will be:
+    - Check current interface's definitions
+    - Check current protocols's definitions
+    - Check interface map
+Actually importing the other protocols will be the responsibility of the build system.

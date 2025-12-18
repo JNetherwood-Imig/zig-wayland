@@ -1,0 +1,3 @@
+xdg_wm_base WmBase
+xdg_surface Surface
+xdg_toplevel Toplevel

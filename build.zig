@@ -1,6 +1,12 @@
 const std = @import("std");
+const protocol = @import("build/protocol.zig");
 
 pub fn build(b: *std.Build) void {
+    const xml = b.dependency("xml", .{});
+    const wayland_dep = b.dependency("wayland", .{});
+    const wayland_protocols_dep = b.dependency("wayland_protocols", .{});
+    const wlr_protocols_dep = b.dependency("wlr_protocols", .{});
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -9,30 +15,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .root_source_file = b.path("src/wayland_core.zig"),
     });
-
-    const doc_object = b.addObject(.{ .name = "wayland_core", .root_module = core });
-    const install_doc_object = b.addInstallDirectory(.{
-        .source_dir = doc_object.getEmittedDocs(),
-        .install_dir = .prefix,
-        .install_subdir = "docs",
-    });
-    const doc_step = b.step("docs", "Generate docs.");
-    doc_step.dependOn(&install_doc_object.step);
-
-    const test_exe = b.addTest(.{ .root_module = core });
-    const run_test = b.addRunArtifact(test_exe);
-    const test_step = b.step("test", "Run all tests.");
-    test_step.dependOn(&run_test.step);
-
-    addProtocols(b, target, optimize, core, test_step, doc_step);
-}
-
-fn makeScanner(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-) *std.Build.Step.Compile {
-    const xml = b.dependency("xml", .{});
 
     const scanner = b.addExecutable(.{
         .name = "scanner",
@@ -45,113 +27,160 @@ fn makeScanner(
     scanner.root_module.addImport("xml", xml.module("xml"));
     b.installArtifact(scanner);
 
-    return scanner;
+    const dep_dir = b.addWriteFiles();
+
+    writeDepSet(b, dep_dir, scanner, wayland_dep, protocol.core, "protocol");
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.stable, "stable");
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.staging, "staging");
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.unstable, "unstable");
+    writeDepSet(b, dep_dir, scanner, wlr_protocols_dep, protocol.wlr, "unstable");
+
+    const gen_dep_step = b.step("deps", "Generate dependency information for protocols.");
+    gen_dep_step.dependOn(&dep_dir.step);
+
+    writeCodeSet(
+        b,
+        target,
+        optimize,
+        core,
+        scanner,
+        dep_dir,
+        wayland_dep,
+        protocol.core,
+        "protocol",
+        .client,
+    );
+
+    const generated = writeCode(
+        b,
+        dep_dir,
+        scanner,
+        wayland_dep.path("protocol/wayland.xml"),
+        "wl",
+        "wayland",
+        &.{},
+        .client,
+    );
+    const wayland_client_protocol = b.addModule("wayland_client_protocol", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = generated,
+    });
+    wayland_client_protocol.addImport("core", core);
+
+    const generated_xdg_shell = writeCode(
+        b,
+        dep_dir,
+        scanner,
+        wayland_protocols_dep.path("stable/xdg-shell/xdg-shell.xml"),
+        "xdg",
+        "xdg_shell",
+        &.{"wayland"},
+        .client,
+    );
+    const xdg_shell_client_protocol = b.addModule("xdg_shell_client_protocol", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = generated_xdg_shell,
+    });
+    xdg_shell_client_protocol.addImport("core", core);
+    xdg_shell_client_protocol.addImport("wayland", wayland_client_protocol);
 }
 
-fn addProtocols(
+fn writeCodeSet(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     core: *std.Build.Module,
-    test_step: *std.Build.Step,
-    doc_step: *std.Build.Step,
+    scanner: *std.Build.Step.Compile,
+    dep_dir: *std.Build.Step.WriteFile,
+    protocol_source: *std.Build.Dependency,
+    comptime protocol_set: type,
+    comptime subdir: []const u8,
+    comptime side: Side,
 ) void {
-    const core_dep = b.dependency("wayland", .{});
-    const protocols_dep = b.dependency("wayland_protocols", .{});
-    const scanner = makeScanner(b, target, optimize);
-
-    inline for (.{ "client", "server" }) |mode| {
-        const run_scanner = b.addRunArtifact(scanner);
-
-        run_scanner.addArgs(&.{ "-m", mode });
-
-        run_scanner.addArg("-o");
-        const output_file = run_scanner.addOutputFileArg(mode ++ "-" ++ "protocol" ++ ".zig");
-
-        run_scanner.addArgs(&.{ "-p", "wl_" });
-        run_scanner.addFileArg(core_dep.path("protocol/wayland.xml"));
-
-        for (wayland_protocols_paths) |protocol| {
-            run_scanner.addArgs(&.{ "-p", protocol.prefix });
-            run_scanner.addFileArg(protocols_dep.path(protocol.path));
-        }
-
-        const mod = b.addModule(mode ++ "-" ++ "protocol", .{
+    inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
+        const protocol_field = @field(protocol_set, decl.name);
+        const output_name = decl.name ++ "_" ++ @tagName(side) ++ "_protocol";
+        const generated = writeCode(
+            b,
+            dep_dir,
+            scanner,
+            protocol_source.path(subdir).path(b, protocol_field.subpath),
+            protocol_field.strip_prefix,
+            decl.name,
+            &.{},
+            side,
+        );
+        const mod = b.addModule(output_name, .{
             .target = target,
             .optimize = optimize,
-            .root_source_file = output_file,
+            .root_source_file = generated,
         });
         mod.addImport("core", core);
-
-        const mod_test_exe = b.addTest(.{ .root_module = mod });
-        const run_mod_test = b.addRunArtifact(mod_test_exe);
-        test_step.dependOn(&run_mod_test.step);
-
-        const doc_obj = b.addObject(.{ .name = mode ++ "_protocol", .root_module = mod });
-        const install_doc = b.addInstallDirectory(.{
-            .source_dir = doc_obj.getEmittedDocs(),
-            .install_dir = .prefix,
-            .install_subdir = "docs/" ++ mode,
-        });
-        doc_step.dependOn(&install_doc.step);
     }
 }
 
-const ProtocolInfo = struct {
-    path: []const u8,
+fn writeCode(
+    b: *std.Build,
+    dep_dir: *std.Build.Step.WriteFile,
+    scanner: *std.Build.Step.Compile,
+    input_path: std.Build.LazyPath,
     prefix: []const u8,
-};
+    comptime name: []const u8,
+    comptime imports: []const []const u8,
+    comptime side: Side,
+) std.Build.LazyPath {
+    const run_scanner = b.addRunArtifact(scanner);
+    run_scanner.addArg(@tagName(side) ++ "_code");
+    run_scanner.addFileArg(input_path);
+    run_scanner.addArgs(&.{ "-p", prefix });
+    run_scanner.addArg("-o");
+    const output = run_scanner.addOutputFileArg(name ++ ".zig");
+    inline for (imports) |import| {
+        run_scanner.addArg("-i");
+        const path = dep_dir.getDirectory().path(b, import ++ ".dep");
+        run_scanner.addFileArg(path);
+    }
+    return output;
+}
 
-const wayland_protocols_paths = [_]ProtocolInfo{
-    .{ .path = "stable/linux-dmabuf/linux-dmabuf-v1.xml", .prefix = "zwp_linux_" },
-    .{ .path = "stable/presentation-time/presentation-time.xml", .prefix = "wp_" },
-    .{ .path = "stable/tablet/tablet-v2.xml", .prefix = "zwp_" },
-    .{ .path = "stable/viewporter/viewporter.xml", .prefix = "wp_" },
-    .{ .path = "stable/xdg-shell/xdg-shell.xml", .prefix = "xdg_" },
+fn writeDepSet(
+    b: *std.Build,
+    dep_dir: *std.Build.Step.WriteFile,
+    scanner: *std.Build.Step.Compile,
+    protocol_source: *std.Build.Dependency,
+    comptime protocol_set: type,
+    comptime subdir: []const u8,
+) void {
+    inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
+        const protocol_field = @field(protocol_set, decl.name);
+        writeDep(
+            b,
+            dep_dir,
+            scanner,
+            protocol_source.path(subdir).path(b, protocol_field.subpath),
+            protocol_field.strip_prefix,
+            decl.name,
+        );
+    }
+}
 
-    .{ .path = "staging/alpha-modifier/alpha-modifier-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/color-management/color-management-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/color-representation/color-representation-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/commit-timing/commit-timing-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/content-type/content-type-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/cursor-shape/cursor-shape-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/drm-lease/drm-lease-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/ext-background-effect/ext-background-effect-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-data-control/ext-data-control-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-idle-notify/ext-idle-notify-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-image-capture-source/ext-image-capture-source-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-session-lock/ext-session-lock-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-transient-seat/ext-transient-seat-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/ext-workspace/ext-workspace-v1.xml", .prefix = "ext_" },
-    .{ .path = "staging/fifo/fifo-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/fractional-scale/fractional-scale-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/linux-drm-syncobj/linux-drm-syncobj-v1.xml", .prefix = "wp_linux_" },
-    .{ .path = "staging/pointer-warp/pointer-warp-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/security-context/security-context-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/single-pixel-buffer/single-pixel-buffer-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/tearing-control/tearing-control-v1.xml", .prefix = "wp_" },
-    .{ .path = "staging/xdg-activation/xdg-activation-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xdg-dialog/xdg-dialog-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xdg-system-bell/xdg-system-bell-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xdg-toplevel-drag/xdg-toplevel-drag-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xdg-toplevel-tag/xdg-toplevel-tag-v1.xml", .prefix = "xdg_" },
-    .{ .path = "staging/xwayland-shell/xwayland-shell-v1.xml", .prefix = "xwayland_" },
+fn writeDep(
+    b: *std.Build,
+    dep_dir: *std.Build.Step.WriteFile,
+    scanner: *std.Build.Step.Compile,
+    input_path: std.Build.LazyPath,
+    prefix: []const u8,
+    comptime name: []const u8,
+) void {
+    const run_scanner = b.addRunArtifact(scanner);
+    run_scanner.addArg("dep_info");
+    run_scanner.addFileArg(input_path);
+    run_scanner.addArgs(&.{ "-p", prefix });
+    run_scanner.addArg("-o");
+    const output = run_scanner.addOutputFileArg(name ++ ".dep");
+    _ = dep_dir.addCopyFile(output, name ++ ".dep");
+}
 
-    .{ .path = "unstable/fullscreen-shell/fullscreen-shell-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/idle-inhibit/idle-inhibit-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/input-method/input-method-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/input-timestamps/input-timestamps-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/pointer-constraints/pointer-constraints-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/pointer-gestures/pointer-gestures-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/primary-selection/primary-selection-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/relative-pointer/relative-pointer-unstable-v1.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/text-input/text-input-unstable-v3.xml", .prefix = "zwp_" },
-    .{ .path = "unstable/xdg-decoration/xdg-decoration-unstable-v1.xml", .prefix = "zxdg_" },
-    .{ .path = "unstable/xdg-foreign/xdg-foreign-unstable-v2.xml", .prefix = "zxdg_" },
-    .{ .path = "unstable/xdg-output/xdg-output-unstable-v1.xml", .prefix = "zxdg_" },
-    .{ .path = "unstable/xwayland-keyboard-grab/xwayland-keyboard-grab-unstable-v1.xml", .prefix = "zwp_xwayland_" },
-};
+const Side = enum { client, server };

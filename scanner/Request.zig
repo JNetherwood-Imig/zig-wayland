@@ -90,13 +90,13 @@ pub fn write(
     defer gpa.free(fn_name);
 
     const max_length = self.calculateMaxLength();
-    try writer.print("\t\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
-    try writer.print("\t\tpub const {s}_request_length = {d};\n", .{ self.name, max_length });
+    try writer.print("\n\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
+    try writer.print("\tpub const {s}_request_length = {d};\n\n", .{ self.name, max_length });
 
-    if (self.description) |d| try d.write(writer, "\t\t/// ");
+    if (self.description) |d| try d.write(writer, "\t/// ");
     try for (self.args.items) |arg| switch (arg.type) {
         .new_id => break self.writeConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
-        .any_new_id => break try self.writeAnyConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
+        .any_new_id => break try self.writeGenericConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         else => continue,
     } else self.writeNormal(gpa, writer, map, parent_interface_entry.type_name, fn_name);
 
@@ -120,31 +120,31 @@ fn writeNormal(
     };
 
     try writer.print("\t\tpub fn {s}(\n", .{fn_name});
-    try writer.print("\t\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\t\tconnection: *Connection,\n");
+    try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args.items) |arg| try arg.write(gpa, writer, map);
-    try writer.writeAll("\t\t) !void {\n");
+    try writer.writeAll("\t) !void {\n");
     try writer.print(
-        "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
     );
     try writer.print(
-        "\t\t\tconst serialized_len = self.serialize{c}{s}(\n",
+        "\t\tconst serialized_len = self.serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
-    try writer.writeAll("\t\t\t\t&message_buffer,\n");
-    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
-    try writer.writeAll("\t\t\t);\n");
+    try writer.writeAll("\t\t\t&message_buffer,\n");
+    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
+    try writer.writeAll("\t\t);\n");
     if (fd_count > 0) {
-        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
+        try writer.writeAll("\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         }
-        try writer.writeAll("\t\t\t});\n");
+        try writer.writeAll("\t\t});\n");
     } else {
-        try writer.writeAll("\t\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
+        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
-    try writer.writeAll("\t\t}\n");
+    try writer.writeAll("\t}\n\n");
 }
 
 fn writeConstructor(
@@ -168,39 +168,39 @@ fn writeConstructor(
     } else unreachable;
     const entry = try map.get(return_arg.type.new_id);
 
-    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
-    try writer.print("\t\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\t\tconnection: *Connection,\n");
+    try writer.print("\n\tpub fn {s}(\n", .{fn_name});
+    try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args.items) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
-    try writer.print("\t\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
+    try writer.print("\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
-    try writer.print("\t\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
+    try writer.print("\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
     try writer.print(
-        "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
     );
     try writer.print(
-        "\t\t\tconst serialized_len = self.serialize{c}{s}(\n",
+        "\t\tconst serialized_len = self.serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
-    try writer.writeAll("\t\t\t\t&message_buffer,\n");
-    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
-    try writer.writeAll("\t\t\t);\n");
+    try writer.writeAll("\t\t\t&message_buffer,\n");
+    for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
+    try writer.writeAll("\t\t);\n");
     if (fd_count > 0) {
-        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
+        try writer.writeAll("\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         }
-        try writer.writeAll("\t\t\t});\n");
+        try writer.writeAll("\t\t});\n");
     } else {
-        try writer.writeAll("\t\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
+        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
-    try writer.print("\t\t\treturn @enumFromInt({s}_);\n", .{return_arg.name});
-    try writer.writeAll("\t\t}\n");
+    try writer.print("\t\treturn @enumFromInt({s}_);\n", .{return_arg.name});
+    try writer.writeAll("\t}\n\n");
 }
 
-fn writeAnyConstructor(
+fn writeGenericConstructor(
     self: *const Request,
     gpa: Allocator,
     writer: *std.Io.Writer,
@@ -215,41 +215,41 @@ fn writeAnyConstructor(
         }
         break :count count;
     };
-    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
-    try writer.print("\t\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\t\tconnection: *Connection,\n");
-    try writer.writeAll("\t\t\tcomptime T: type,\n");
-    try writer.writeAll("\t\t\tversion: T.Version,\n");
+    try writer.print("\n\tpub fn {s}(\n", .{fn_name});
+    try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tconnection: *Connection,\n");
+    try writer.writeAll("\t\tcomptime T: type,\n");
+    try writer.writeAll("\t\tversion: T.Version,\n");
     for (self.args.items) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
-    try writer.writeAll("\t\t) !T {\n");
-    try writer.writeAll("\t\t\tconst new_id = try connection.ida.alloc();\n");
+    try writer.writeAll("\t) !T {\n");
+    try writer.writeAll("\t\tconst new_id = try connection.ida.alloc();\n");
     try writer.print(
-        "\t\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
     );
     try writer.print(
-        "\t\t\tconst serialized_len = self.serialize{c}{s}(\n",
+        "\t\tconst serialized_len = self.serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
-    try writer.writeAll("\t\t\t\t&message_buffer,\n");
+    try writer.writeAll("\t\t\t&message_buffer,\n");
     for (self.args.items) |arg| switch (arg.type) {
         .fd => {},
-        .any_new_id => try writer.writeAll("\t\t\t\t.init(T, version, new_id),\n"),
-        else => try writer.print("\t\t\t\t{s}_,\n", .{arg.name}),
+        .any_new_id => try writer.writeAll("\t\t\t.init(T, version, new_id),\n"),
+        else => try writer.print("\t\t\t{s}_,\n", .{arg.name}),
     };
-    try writer.writeAll("\t\t\t);\n");
+    try writer.writeAll("\t\t);\n");
     if (fd_count > 0) {
-        try writer.writeAll("\t\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
+        try writer.writeAll("\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n");
         for (self.args.items) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         }
-        try writer.writeAll("\t\t\t});\n");
+        try writer.writeAll("\t\t});\n");
     } else {
-        try writer.writeAll("\t\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
+        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
-    try writer.writeAll("\t\t\treturn @enumFromInt(new_id);\n");
-    try writer.writeAll("\t\t}\n");
+    try writer.writeAll("\t\treturn @enumFromInt(new_id);\n");
+    try writer.writeAll("\t}\n\n");
 }
 
 fn writeSerialize(
@@ -261,32 +261,32 @@ fn writeSerialize(
     fn_name: []const u8,
 ) !void {
     try writer.print(
-        "\t\tfn serialize{c}{s}(\n",
+        "\tfn serialize{c}{s}(\n",
         .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
     );
-    try writer.print("\t\t\tself: {s},\n", .{interface_type});
-    try writer.writeAll("\t\t\tbuf: []u8,\n");
+    try writer.print("\t\tself: {s},\n", .{interface_type});
+    try writer.writeAll("\t\tbuf: []u8,\n");
     for (self.args.items) |arg| if (arg.type != .fd) try arg.write(gpa, writer, map);
-    try writer.writeAll("\t\t) usize {\n");
-    try writer.writeAll("\t\t\treturn wire.serializeArgs(\n");
-    try writer.writeAll("\t\t\t\tbuf,\n");
-    try writer.writeAll("\t\t\t\tself.getId(),\n");
-    try writer.print("\t\t\t\t{s}_request_opcode,\n", .{self.name});
+    try writer.writeAll("\t) usize {\n");
+    try writer.writeAll("\t\treturn wire.serializeArgs(\n");
+    try writer.writeAll("\t\t\tbuf,\n");
+    try writer.writeAll("\t\t\tself.getId(),\n");
+    try writer.print("\t\t\t{s}_request_opcode,\n", .{self.name});
     if (self.args.items.len > 0) {
-        try writer.writeAll("\t\t\t\t.{\n");
+        try writer.writeAll("\t\t\t.{\n");
         for (self.args.items) |arg| switch (arg.type) {
             .fd => {},
-            .string => try writer.print("\t\t\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
-            .optional_string => try writer.print("\t\t\t\t\tcore.wire.String.initNullable({s}_),\n", .{arg.name}),
-            .array => try writer.print("\t\t\t\t\tcore.wire.Array.init({s}_),\n", .{arg.name}),
-            .optional_object => try writer.print("\t\t\t\t\t@as(?u32, if ({s}_) |_inner| _inner.getId() else null),\n", .{arg.name}),
-            .object => try writer.print("\t\t\t\t\t{s}_.getId(),\n", .{arg.name}),
-            else => try writer.print("\t\t\t\t\t{s}_,\n", .{arg.name}),
+            .string => try writer.print("\t\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
+            .optional_string => try writer.print("\t\t\t\tcore.wire.String.initNullable({s}_),\n", .{arg.name}),
+            .array => try writer.print("\t\t\t\tcore.wire.Array.init({s}_),\n", .{arg.name}),
+            .optional_object => try writer.print("\t\t\t\t@as(?u32, if ({s}_) |_inner| _inner.getId() else null),\n", .{arg.name}),
+            .object => try writer.print("\t\t\t\t{s}_.getId(),\n", .{arg.name}),
+            else => try writer.print("\t\t\t\t{s}_,\n", .{arg.name}),
         };
-        try writer.writeAll("\t\t\t\t},\n");
-    } else try writer.writeAll("\t\t\t\t.{},\n");
-    try writer.writeAll("\t\t\t);\n");
-    try writer.writeAll("\t\t}\n");
+        try writer.writeAll("\t\t\t},\n");
+    } else try writer.writeAll("\t\t\t.{},\n");
+    try writer.writeAll("\t\t);\n");
+    try writer.writeAll("\t}\n\n");
 }
 
 fn calculateMaxLength(self: *const Request) usize {

@@ -25,5 +25,9 @@
             .url = "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.45/downloads/wayland-protocols-1.45.tar.xz",
             .hash = "N-V-__8AAIKCDgBX6hRMzFmvC-WAwrOH_ewvZgAzPGbBvavk",
         },
+        .wlr_protocols = .{
+            .url = "git+https://gitlab.freedesktop.org/wlroots/wlr-protocols.git#a741f0ac5d655338a5100fc34bc8cec87d237346",
+            .hash = "N-V-__8AAMm4AQANnGv8ZhQ9FX_ipu-oul8H7XP9WPD6r5KD",
+        },
     },
 }

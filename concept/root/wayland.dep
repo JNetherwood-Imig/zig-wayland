@@ -1,0 +1,4 @@
+wl_display Display
+wl_registry Registry
+wl_compositor Compositor
+wl_surface Surface

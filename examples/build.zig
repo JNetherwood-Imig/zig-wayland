@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     hello_world.root_module.addImport("wayland", wayland.module("wayland_core"));
-    hello_world.root_module.addImport("protocol", wayland.module("client-protocol"));
+    hello_world.root_module.addImport("wayland_client_protocol", wayland.module("wayland_client_protocol"));
+    hello_world.root_module.addImport("xdg_shell_client_protocol", wayland.module("xdg_shell_client_protocol"));
     b.installArtifact(hello_world);
 }
