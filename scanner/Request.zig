@@ -119,7 +119,7 @@ fn writeNormal(
         break :count count;
     };
 
-    try writer.print("\t\tpub fn {s}(\n", .{fn_name});
+    try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args.items) |arg| try arg.write(gpa, writer, map);

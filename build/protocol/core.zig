@@ -3,4 +3,5 @@
 pub const wayland = .{
     .subpath = "wayland.xml",
     .strip_prefix = "wl",
+    .imports = &.{},
 };

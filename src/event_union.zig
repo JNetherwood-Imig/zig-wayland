@@ -20,17 +20,18 @@ pub fn EventUnion(comptime protocols: anytype) type {
         const protocol = @field(protocols, protocol_field.name);
         inline for (@typeInfo(protocol).@"struct".decls) |interface_decl| {
             const interface = @field(protocol, interface_decl.name);
-            const InterfaceEvent = InterfaceEventUnion(interface);
-            event_union.fields = event_union.fields ++ [_]Type.UnionField{.{
-                .alignment = @alignOf(InterfaceEvent),
-                .name = interface.interface,
-                .type = InterfaceEvent,
-            }};
-            backing_enum.fields = backing_enum.fields ++ [_]Type.EnumField{.{
-                .name = interface.interface,
-                .value = next_value,
-            }};
-            next_value += 1;
+            if (InterfaceEventUnion(interface)) |InterfaceEvent| {
+                event_union.fields = event_union.fields ++ [_]Type.UnionField{.{
+                    .alignment = @alignOf(InterfaceEvent),
+                    .name = interface.interface,
+                    .type = InterfaceEvent,
+                }};
+                backing_enum.fields = backing_enum.fields ++ [_]Type.EnumField{.{
+                    .name = interface.interface,
+                    .value = next_value,
+                }};
+                next_value += 1;
+            }
         }
     }
 
@@ -38,7 +39,7 @@ pub fn EventUnion(comptime protocols: anytype) type {
     return @Type(.{ .@"union" = event_union });
 }
 
-fn InterfaceEventUnion(comptime Interface: type) type {
+fn InterfaceEventUnion(comptime Interface: type) ?type {
     var event_union = Type.Union{
         .decls = &.{},
         .fields = &.{},
@@ -77,6 +78,8 @@ fn InterfaceEventUnion(comptime Interface: type) type {
         }
     }
 
-    backing_enum.tag_type = @Type(.{ .@"enum" = backing_enum });
+    if (event_union.fields.len == 0) return null;
+
+    event_union.tag_type = @Type(.{ .@"enum" = backing_enum });
     return @Type(.{ .@"union" = event_union });
 }

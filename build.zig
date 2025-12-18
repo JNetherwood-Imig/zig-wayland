@@ -38,11 +38,16 @@ pub fn build(b: *std.Build) void {
     const gen_dep_step = b.step("deps", "Generate dependency information for protocols.");
     gen_dep_step.dependOn(&dep_dir.step);
 
+    const test_core = b.addTest(.{ .root_module = core });
+    const test_step = b.step("test", "Test everything!!!");
+    test_step.dependOn(&test_core.step);
+
     writeCodeSet(
         b,
         target,
         optimize,
         core,
+        test_step,
         scanner,
         dep_dir,
         wayland_dep,
@@ -51,40 +56,58 @@ pub fn build(b: *std.Build) void {
         .client,
     );
 
-    const generated = writeCode(
+    writeCodeSet(
         b,
-        dep_dir,
+        target,
+        optimize,
+        core,
+        test_step,
         scanner,
-        wayland_dep.path("protocol/wayland.xml"),
-        "wl",
-        "wayland",
-        &.{},
+        dep_dir,
+        wayland_protocols_dep,
+        protocol.stable,
+        "stable",
         .client,
     );
-    const wayland_client_protocol = b.addModule("wayland_client_protocol", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = generated,
-    });
-    wayland_client_protocol.addImport("core", core);
-
-    const generated_xdg_shell = writeCode(
+    writeCodeSet(
         b,
-        dep_dir,
+        target,
+        optimize,
+        core,
+        test_step,
         scanner,
-        wayland_protocols_dep.path("stable/xdg-shell/xdg-shell.xml"),
-        "xdg",
-        "xdg_shell",
-        &.{"wayland"},
+        dep_dir,
+        wayland_protocols_dep,
+        protocol.staging,
+        "staging",
         .client,
     );
-    const xdg_shell_client_protocol = b.addModule("xdg_shell_client_protocol", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = generated_xdg_shell,
-    });
-    xdg_shell_client_protocol.addImport("core", core);
-    xdg_shell_client_protocol.addImport("wayland", wayland_client_protocol);
+    writeCodeSet(
+        b,
+        target,
+        optimize,
+        core,
+        test_step,
+        scanner,
+        dep_dir,
+        wayland_protocols_dep,
+        protocol.unstable,
+        "unstable",
+        .client,
+    );
+    // writeCodeSet(
+    //     b,
+    //     target,
+    //     optimize,
+    //     core,
+    //     test_step,
+    //     scanner,
+    //     dep_dir,
+    //     wayland_protocols_dep,
+    //     protocol.wlr,
+    //     "unstable",
+    //     .client,
+    // );
 }
 
 fn writeCodeSet(
@@ -92,6 +115,7 @@ fn writeCodeSet(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     core: *std.Build.Module,
+    test_step: *std.Build.Step,
     scanner: *std.Build.Step.Compile,
     dep_dir: *std.Build.Step.WriteFile,
     protocol_source: *std.Build.Dependency,
@@ -101,28 +125,29 @@ fn writeCodeSet(
 ) void {
     inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
         const protocol_field = @field(protocol_set, decl.name);
-        const output_name = decl.name ++ "_" ++ @tagName(side) ++ "_protocol";
-        const generated = writeCode(
+        writeCode(
             b,
+            target,
+            optimize,
+            core,
+            test_step,
             dep_dir,
             scanner,
             protocol_source.path(subdir).path(b, protocol_field.subpath),
             protocol_field.strip_prefix,
             decl.name,
-            &.{},
+            protocol_field.imports,
             side,
         );
-        const mod = b.addModule(output_name, .{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = generated,
-        });
-        mod.addImport("core", core);
     }
 }
 
 fn writeCode(
     b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    core: *std.Build.Module,
+    test_step: *std.Build.Step,
     dep_dir: *std.Build.Step.WriteFile,
     scanner: *std.Build.Step.Compile,
     input_path: std.Build.LazyPath,
@@ -130,7 +155,8 @@ fn writeCode(
     comptime name: []const u8,
     comptime imports: []const []const u8,
     comptime side: Side,
-) std.Build.LazyPath {
+) void {
+    const output_name = name ++ "_" ++ @tagName(side) ++ "_protocol";
     const run_scanner = b.addRunArtifact(scanner);
     run_scanner.addArg(@tagName(side) ++ "_code");
     run_scanner.addFileArg(input_path);
@@ -142,7 +168,17 @@ fn writeCode(
         const path = dep_dir.getDirectory().path(b, import ++ ".dep");
         run_scanner.addFileArg(path);
     }
-    return output;
+    const mod = b.addModule(output_name, .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = output,
+    });
+    mod.addImport("core", core);
+    inline for (imports) |import| {
+        mod.addImport(import, b.modules.get(import ++ "_" ++ @tagName(side) ++ "_protocol").?);
+    }
+    const test_exe = b.addTest(.{ .root_module = mod });
+    test_step.dependOn(&test_exe.step);
 }
 
 fn writeDepSet(
