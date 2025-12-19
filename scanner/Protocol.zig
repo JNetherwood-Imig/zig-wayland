@@ -22,7 +22,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Protocol 
     errdefer gpa.free(name);
 
     var description: ?Description = null;
-    errdefer if (description) |*desc| desc.deinit(gpa);
+    errdefer if (description) |desc| desc.deinit(gpa);
 
     var copyright: ?[]const u8 = null;
     errdefer if (copyright) |c| gpa.free(c);
@@ -63,7 +63,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Protocol 
 }
 
 pub fn deinit(self: *Protocol, gpa: Allocator) void {
-    if (self.description) |*d| d.deinit(gpa);
+    if (self.description) |d| d.deinit(gpa);
     if (self.copyright) |c| gpa.free(c);
     for (self.interfaces.items) |*i| i.deinit(gpa);
     self.interfaces.deinit(gpa);
@@ -85,7 +85,7 @@ pub fn emitClientCode(
     if (self.copyright) |c| try writeCopyright(c, writer);
 
     for (self.interfaces.items) |interface|
-        try interface.write(gpa, writer, map);
+        try interface.emitClientCode(gpa, writer, map);
 
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
@@ -99,6 +99,8 @@ pub fn emitClientCode(
 
     try writer.writeAll("test { @import(\"std\").testing.refAllDecls(@This()); }\n\n");
 }
+
+fn emitFooter()
 
 pub fn emitDepInfo(
     self: *const Protocol,

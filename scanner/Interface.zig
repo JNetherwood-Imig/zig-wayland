@@ -3,8 +3,7 @@ const xml = @import("xml");
 const util = @import("util.zig");
 const InterfaceMap = @import("InterfaceMap.zig");
 const Description = @import("Description.zig");
-const Request = @import("Request.zig");
-const Event = @import("Event.zig");
+const Message = @import("Message.zig");
 const Enum = @import("Enum.zig");
 const log = std.log.scoped(.scanner);
 const Allocator = std.mem.Allocator;
@@ -14,8 +13,8 @@ const Interface = @This();
 name: []const u8,
 version: u32,
 description: ?Description = null,
-requests: std.ArrayList(Request),
-events: std.ArrayList(Event),
+requests: []const Message,
+events: []const Message,
 enums: std.ArrayList(Enum),
 
 pub fn parse(gpa: Allocator, reader: *xml.Reader) !Interface {
@@ -36,13 +35,13 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Interface {
     var description: ?Description = null;
     errdefer if (description) |*desc| desc.deinit(gpa);
 
-    var requests = try std.ArrayList(Request).initCapacity(gpa, 8);
+    var requests = try std.ArrayList(Message).initCapacity(gpa, 8);
     errdefer {
         for (requests.items) |*req| req.deinit(gpa);
         requests.deinit(gpa);
     }
 
-    var events = try std.ArrayList(Event).initCapacity(gpa, 8);
+    var events = try std.ArrayList(Message).initCapacity(gpa, 8);
     errdefer {
         for (events.items) |*ev| ev.deinit(gpa);
         events.deinit(gpa);
@@ -67,11 +66,11 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Interface {
             if (std.mem.eql(u8, elem, "description")) {
                 description = try Description.parse(gpa, reader);
             } else if (std.mem.eql(u8, elem, "request")) {
-                var request = try Request.parse(gpa, reader);
+                var request = try Message.scan(gpa, reader);
                 errdefer request.deinit(gpa);
                 try requests.append(gpa, request);
             } else if (std.mem.eql(u8, elem, "event")) {
-                var event = try Event.parse(gpa, reader);
+                var event = try Message.scan(gpa, reader);
                 errdefer event.deinit(gpa);
                 try events.append(gpa, event);
             } else if (std.mem.eql(u8, elem, "enum")) {
@@ -87,32 +86,71 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Interface {
         .name = name orelse return error.NameNotFound,
         .version = version orelse return error.VersionNotFound,
         .description = description,
-        .requests = requests,
-        .events = events,
+        .requests = try requests.toOwnedSlice(gpa),
+        .events = try events.toOwnedSlice(gpa),
         .enums = enums,
     };
 }
 
 pub fn deinit(self: *Interface, gpa: Allocator) void {
-    gpa.free(self.name);
-    if (self.description) |*desc| desc.deinit(gpa);
-    for (self.requests.items) |*req| req.deinit(gpa);
-    for (self.events.items) |*ev| ev.deinit(gpa);
+    if (self.description) |desc| desc.deinit(gpa);
+    for (self.requests) |req| req.deinit(gpa);
+    for (self.events) |ev| ev.deinit(gpa);
     for (self.enums.items) |*en| en.deinit(gpa);
-    self.requests.deinit(gpa);
-    self.events.deinit(gpa);
     self.enums.deinit(gpa);
+    gpa.free(self.requests);
+    gpa.free(self.events);
+    gpa.free(self.name);
 }
 
-pub fn write(
+pub fn emitClientCode(
     self: *const Interface,
     gpa: Allocator,
     writer: *std.Io.Writer,
     map: *const InterfaceMap,
 ) !void {
-    const map_entry = try map.get(self.name);
-    const type_name = map_entry.type_name;
+    try self.emitCommon(writer, map);
 
+    for (self.requests, 0..) |request, opcode|
+        try request.emitOutgoingMessage(gpa, writer, map, self.name, opcode);
+
+    for (self.events, 0..) |event, opcode|
+        try event.emitIncomingMessage(gpa, writer, map, self.name, opcode);
+
+    for (self.enums.items) |en|
+        try en.write(gpa, writer);
+
+    try writer.writeAll("};\n\n");
+}
+
+pub fn emitServerCode(
+    self: *const Interface,
+    gpa: Allocator,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+) !void {
+    try self.emitCommon(gpa, writer);
+
+    for (self.requests, 0..) |request, opcode|
+        try request.emitIncomingMessage(gpa, writer, map, self.name, opcode);
+
+    for (self.events, 0..) |event, opcode|
+        try event.emitOutgoingMessage(gpa, writer, map, self.name, opcode);
+
+    for (self.enums.items) |en|
+        try en.write(gpa, writer);
+
+    try writer.writeAll("};\n\n");
+}
+
+fn emitCommon(
+    self: *const Interface,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+) !void {
+    const map_entry = try map.get(self.name);
+
+    const type_name = map_entry.type_name;
     if (self.description) |d| try d.write(writer, "/// ");
     try writer.print("pub const {s} = enum(u32) {{\n", .{type_name});
     try writer.writeAll("\tnull_handle = 0,\n\t_,\n\n");
@@ -124,17 +162,6 @@ pub fn write(
         "\tpub fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
         .{type_name},
     );
-
-    for (self.requests.items, 0..) |request, opcode|
-        try request.write(gpa, writer, map, self.name, opcode);
-
-    for (self.events.items, 0..) |event, opcode|
-        try event.write(gpa, writer, map, self.name, opcode);
-
-    for (self.enums.items) |en|
-        try en.write(gpa, writer);
-
-    try writer.writeAll("};\n\n");
 }
 
 pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]const u8 {

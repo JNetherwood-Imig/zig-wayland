@@ -30,7 +30,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Description {
     return .{ .summary = summary, .body = maybe_body };
 }
 
-pub fn deinit(self: *Description, gpa: Allocator) void {
+pub fn deinit(self: Description, gpa: Allocator) void {
     gpa.free(self.summary);
     if (self.body) |body| gpa.free(body);
 }
