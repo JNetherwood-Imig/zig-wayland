@@ -1,0 +1,14 @@
+.{
+    .name = .hello_server,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x327d2fb1c0a8f84b,
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+    },
+    .dependencies = .{
+        .wayland = .{ .path = "../.." },
+    },
+}

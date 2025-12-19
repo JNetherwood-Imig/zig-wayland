@@ -30,7 +30,12 @@ pub fn main() !void {
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
     // Create connection using buffers
-    conn = try wayland.ConnectInfo.getDefault().connect(ida, &buffers);
+    var sock_info: wayland.SocketInfo = .auto;
+    conn = sock_info.connect(ida, &buffers) catch |err| {
+        std.log.err("Failed to connect to {f}.", .{sock_info});
+        return err;
+    };
+    std.log.info("Connected to {f}.", .{sock_info});
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;
