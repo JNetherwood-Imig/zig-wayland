@@ -19,14 +19,13 @@ pub fn close(self: Server) void {
 /// Wait for an incoming connection attempt.
 /// `timeout` is in milliseconds and passing -1 will wait indefinately.
 pub fn waitForConnection(self: Server, timeout: i32) !void {
-    while (true) {
-        var pfd = [1]posix.pollfd{.{
-            .events = posix.POLL.IN,
-            .fd = self.handle,
-            .revents = 0,
-        }};
-        if (try posix.poll(&pfd, timeout) > 0) break;
-    }
+    var pfd = [1]posix.pollfd{.{
+        .events = posix.POLL.IN,
+        .fd = self.handle,
+        .revents = 0,
+    }};
+    if (try posix.poll(&pfd, timeout) == 0)
+        return error.Timeout;
 }
 
 pub const AcceptError = posix.AcceptError;
