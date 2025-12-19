@@ -90,7 +90,7 @@ fn makeScanner(
     xml_dep: *std.Build.Dependency,
 ) *std.Build.Step.Compile {
     const scanner = b.addExecutable(.{
-        .name = "scanner",
+        .name = "wayland_scanner",
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
@@ -155,6 +155,7 @@ fn writeDepSet(
             protocol_field.strip_prefix,
             decl.name ++ ".dep",
         );
+        b.addNamedLazyPath(decl.name ++ "_dep", generated);
         _ = dep_dir.addCopyFile(generated, decl.name ++ ".dep");
     }
 }

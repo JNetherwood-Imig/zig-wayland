@@ -283,7 +283,7 @@ fn writeSerialize(
         try writer.writeAll("\t\t\t},\n");
     } else try writer.writeAll("\t\t\t.{},\n");
     try writer.writeAll("\t\t);\n");
-    try writer.writeAll("\t}\n\n");
+    try writer.writeAll("\t}\n");
 }
 
 fn calculateMaxLength(self: *const Request) usize {
