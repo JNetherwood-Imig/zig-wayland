@@ -23,6 +23,18 @@ pub fn build(b: *std.Build) void {
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
     test_step.dependOn(&run_core_tests.step);
+    const doc_object = b.addObject(.{
+        .name = "wayland_core",
+        .root_module = core,
+    });
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = doc_object.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    const docs_step = b.step("docs", "Install docs into zig-out/docs");
+    docs_step.dependOn(&install_docs.step);
 
     const dep_dir = makeProtocolDeps(
         b,
