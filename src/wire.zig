@@ -217,16 +217,33 @@ fn deserializeArg(comptime T: type, comptime sig_byte: u8, bytes: []const u8) st
         },
         // We have a struct, which could either be a `Fixed`, or some packed struct(u32) from
         // codegen representing a bitfield enum.
-        .@"struct" => {
-            comptime std.debug.assert(sig_byte == 'f' or sig_byte == 'u');
-            // fixed
-            if (sig_byte == 'f') {
+        .@"struct" => switch (sig_byte) {
+            'f' => { // fixed
                 const val = Fixed{ .data = std.mem.bytesToValue(i32, bytes[0..@sizeOf(i32)]) };
                 return .{ val, @sizeOf(i32) };
-            }
-            // bitfield
-            const val = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
-            return .{ @bitCast(val), @sizeOf(u32) };
+            },
+            'u' => { // bitfield
+                const val = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
+                return .{ @bitCast(val), @sizeOf(u32) };
+            },
+            'g' => { // generic new id
+                var idx: usize = 0;
+                const interface_len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
+                idx += 4;
+                const interface: [:0]const u8 = @ptrCast(bytes[idx..][0 .. interface_len - 1]);
+                idx += roundup4(interface_len);
+                const version = std.mem.bytesToValue(u32, bytes[idx..][0..@sizeOf(u32)]);
+                idx += 4;
+                const new_id = std.mem.bytesToValue(u32, bytes[idx..][0..@sizeOf(u32)]);
+                idx += 4;
+                const val = GenericNewId{
+                    .interface = .init(interface),
+                    .version = version,
+                    .new_id = new_id,
+                };
+                return .{ val, idx };
+            },
+            else => unreachable,
         },
         // We have an object or enum (not bitfield).
         .@"enum" => |e| {

@@ -111,7 +111,7 @@ pub fn emitIncomingMessage(
         .array => 'a',
         .new_id => 'n',
         .fd => 'd',
-        .any_new_id => unreachable,
+        .any_new_id => 'g', // g for generic new id
     });
     try writer.writeAll("\";\n");
     try writer.print("\t\t{s}: {s}.{s},\n", .{ interface, parent_entry.protocol, parent_entry.type_name });
@@ -363,7 +363,7 @@ fn calculateMaxLength(self: *const Message) usize {
 
 fn fnName(self: *const Message, gpa: Allocator) ![]const u8 {
     // Message name is a zig idenitfier, such as `error` or `type` and needs to be wrapped with @"..."
-    if (!std.zig.isValidId(self.name))
+    if (isInvalidId(self.name))
         return self.fnNameInvalid(gpa);
 
     return util.snakeToCamel(gpa, self.name);
@@ -381,4 +381,11 @@ fn fnNameInvalid(self: *const Message, gpa: Allocator) ![]const u8 {
     }
     output.appendAssumeCapacity('"');
     return try output.toOwnedSlice(gpa);
+}
+
+// Fix issues with std.zig.isValidId.
+// We can keep adding special cases to the or chain as they arrive.
+fn isInvalidId(name: []const u8) bool {
+    return !std.zig.isValidId(name) or
+        std.mem.eql(u8, name, "type");
 }

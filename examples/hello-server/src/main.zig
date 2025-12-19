@@ -3,6 +3,9 @@ const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
 const Allocator = std.mem.Allocator;
 
+const Request = wayland.IncomingMessageUnion(.{wl});
+const RequestHandler = wayland.IncomingMessageHandler(Request);
+
 const Client = struct {
     connection: wayland.Connection,
     buffers: wayland.Connection.Buffers,
@@ -48,7 +51,9 @@ pub fn main() !void {
         const client = try Client.create(gpa);
         defer client.destroy(gpa);
 
-        const conn = try server.accept(client.ida, &client.buffers);
+        var conn = try server.accept(client.ida, &client.buffers);
         client.connection = conn;
+
+        _ = try RequestHandler.waitNextMessage(undefined, &conn);
     } else |_| std.log.info("Timed out, exiting...", .{});
 }
