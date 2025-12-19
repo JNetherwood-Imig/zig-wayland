@@ -142,7 +142,7 @@ fn makeProtocols(
     wlp: *std.Build.Dependency,
     wlr: *std.Build.Dependency,
 ) void {
-    inline for (.{ProtocolSide.client}) |side| {
+    inline for (.{ ProtocolSide.client, ProtocolSide.server }) |side| {
         writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wl, protocol.core, side);
         writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.stable, side);
         writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.staging, side);
@@ -200,7 +200,7 @@ fn writeCodeSet(
             protocol_field.strip_prefix,
             decl.name ++ ".zig",
             &imports,
-            .client,
+            side,
         );
 
         const mod = b.addModule(decl.name ++ "_" ++ @tagName(side) ++ "_protocol", .{

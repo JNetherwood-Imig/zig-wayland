@@ -83,10 +83,29 @@ pub fn emitClientCode(
         try writer.writeAll("\n");
     }
     if (self.copyright) |c| try writeCopyright(c, writer);
-
     for (self.interfaces.items) |interface|
         try interface.emitClientCode(gpa, writer, map);
+    try self.emitFooter(writer, imports);
+}
 
+pub fn emitServerCode(
+    self: *const Protocol,
+    gpa: Allocator,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+    imports: []const []const u8,
+) !void {
+    if (self.description) |d| {
+        try d.write(writer, "//! ");
+        try writer.writeAll("\n");
+    }
+    if (self.copyright) |c| try writeCopyright(c, writer);
+    for (self.interfaces.items) |interface|
+        try interface.emitServerCode(gpa, writer, map);
+    try self.emitFooter(writer, imports);
+}
+
+fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []const u8) !void {
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
@@ -99,8 +118,6 @@ pub fn emitClientCode(
 
     try writer.writeAll("test { @import(\"std\").testing.refAllDecls(@This()); }\n\n");
 }
-
-fn emitFooter()
 
 pub fn emitDepInfo(
     self: *const Protocol,

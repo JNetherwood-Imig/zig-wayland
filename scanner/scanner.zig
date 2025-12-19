@@ -70,7 +70,7 @@ pub fn main() !void {
 
     switch (mode) {
         .client => try protocol.emitClientCode(gpa, writer, &map, imports.items),
-        .server => return error.Unimplemented,
+        .server => try protocol.emitServerCode(gpa, writer, &map, imports.items),
         .dep_info => try protocol.emitDepInfo(writer, &map),
     }
 }

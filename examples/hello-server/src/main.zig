@@ -1,6 +1,6 @@
 const std = @import("std");
 const wayland = @import("wayland");
-// const wl = @import("wayland_protocol");
+const wl = @import("wayland_protocol");
 const Allocator = std.mem.Allocator;
 
 const Client = struct {

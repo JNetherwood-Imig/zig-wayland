@@ -1,40 +1,34 @@
 const std = @import("std");
 const wire = @import("wire.zig");
 const Connection = @import("Connection.zig");
-const IdAllocator = @import("IdAllocator.zig");
 const Allocator = std.mem.Allocator;
 
-/// Construct an event handler to handle events present in the `protocol` type.
+/// Construct a message handler to handle messages present in the `protocol` type.
 /// This makes it possible to generate code for custom protocols and pass the resulting type here
 /// to achieve full extensibility.
-pub fn EventHandler(comptime Event: type) type {
+pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
     return struct {
         const Self = @This();
 
         /// List of currently tracked objects
         proxies: std.ArrayList(Proxy),
-        ida: IdAllocator,
 
-        /// Tracks an object and its interface, used for decoding events
+        /// Tracks an object and its interface, used for decoding messages
         pub const Proxy = struct {
             id: u32,
             interface: [:0]const u8,
         };
 
-        /// Initialize an unbounded event handler with an allocator and ititial capacity
-        pub fn initCapacity(
-            gpa: Allocator,
-            ida: IdAllocator,
-            initial_capacity: usize,
-        ) Allocator.Error!Self {
-            return .{ .proxies = try .initCapacity(gpa, initial_capacity), .ida = ida };
+        /// Initialize an unbounded message handler with an allocator and ititial capacity
+        pub fn initCapacity(gpa: Allocator, initial_capacity: usize) Allocator.Error!Self {
+            return .{ .proxies = try .initCapacity(gpa, initial_capacity) };
         }
 
-        /// Initialize a bounded event handler which does not invoke the heap.
+        /// Initialize a bounded message handler which does not invoke the heap.
         /// When initializing this way, always use addObjectBounded instead of addObject
         /// because an allocator cannot be used.
-        pub fn initBuffered(buffer: []Proxy, ida: IdAllocator) Self {
-            return .{ .proxies = .initBuffer(buffer), .ida = ida };
+        pub fn initBuffered(buffer: []Proxy) Self {
+            return .{ .proxies = .initBuffer(buffer) };
         }
 
         /// Free the underlying list of proxies if initialized using `initCapacity`
@@ -44,7 +38,7 @@ pub fn EventHandler(comptime Event: type) type {
 
         pub const AddObjectError = error{OutOfMemory};
 
-        /// Add an object to an unbounded event handler.
+        /// Add an object to an unbounded message handler.
         /// NOTE: Must have been initialized with `initCapacity`,
         /// it is invalid to use this function with `initBuffered`
         /// `object` must be a wayland object created either by a factory interface
@@ -57,7 +51,7 @@ pub fn EventHandler(comptime Event: type) type {
             try self.proxies.append(gpa, proxy);
         }
 
-        /// Add an object to the event handler, failing if capacity is reached.
+        /// Add an object to the message handler, failing if capacity is reached.
         /// This function is meant to be used with `initBuffered`,
         /// but is completely valid to use with `initCapacity`
         /// `object` must be a wayland object created either by a factory interface
@@ -70,7 +64,7 @@ pub fn EventHandler(comptime Event: type) type {
             try self.proxies.appendBounded(proxy);
         }
 
-        /// Add a raw id and associated interface to the event handler.
+        /// Add a raw id and associated interface to the message handler.
         /// NOTE: Must have been initialized with `initCapacity`,
         /// it is invalid to use this function with `initBuffered`
         pub fn addRaw(
@@ -82,7 +76,7 @@ pub fn EventHandler(comptime Event: type) type {
             try self.proxies.append(gpa, .{ .id = id, .interface = interface });
         }
 
-        /// Add a raw id and associated interface to the event handler,
+        /// Add a raw id and associated interface to the message handler,
         /// failing if capacity is reached.
         /// This function is meant to be used with `initBuffered`,
         /// but is completely valid to use with `initCapacity`
@@ -108,35 +102,32 @@ pub fn EventHandler(comptime Event: type) type {
             }
         }
 
-        pub const GetEventError = Connection.FlushError ||
-            Connection.PollEventsError ||
-            IdAllocator.FreeError ||
-            error{ProtocolError};
+        pub const GetMessageError = Connection.FlushError || Connection.PollEventsError;
 
-        /// Try to get an event from the `connection`,
+        /// Try to get an message from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
-        pub fn getNextEvent(
+        pub fn getNextMessage(
             self: *Self,
             connection: *Connection,
-        ) GetEventError!?Event {
-            return self.nextEvent(connection, false);
+        ) GetMessageError!?IncomingMessage {
+            return self.nextMessage(connection, false);
         }
 
-        /// Wait indefinately for an event to be received.
-        pub fn waitNextEvent(
+        /// Wait indefinately for an message to be received.
+        pub fn waitNextMessage(
             self: *Self,
             connection: *Connection,
-        ) GetEventError!Event {
+        ) GetMessageError!IncomingMessage {
             while (true) {
-                if (try self.nextEvent(connection, true)) |ev| return ev;
+                if (try self.nextMessage(connection, true)) |ev| return ev;
             }
         }
 
-        fn nextEvent(
+        fn nextMessage(
             self: *Self,
             conn: *Connection,
             wait: bool,
-        ) GetEventError!?Event {
+        ) GetMessageError!?IncomingMessage {
             // Always start by flushing buffered messages
             conn.flush() catch |err| switch (err) {
                 error.BrokenPipe => {},
@@ -144,7 +135,7 @@ pub fn EventHandler(comptime Event: type) type {
             };
 
             while (true) {
-                // Try to get a header, otherwise poll for events,
+                // Try to get a header, otherwise poll for messages,
                 // returning null if polling times out
                 const header = conn.reader.nextHeader() orelse {
                     if (!try conn.pollEvents(wait)) return null;
@@ -156,70 +147,34 @@ pub fn EventHandler(comptime Event: type) type {
                 std.debug.assert(conn.reader.getData(buf[0..msg_len]) == msg_len);
 
                 // When we find the appropriate proxy, use its interface to lookup the associated
-                // event types and deserialize the event
-                const ev = for (self.proxies.items) |proxy| {
+                // message types and deserialize the message
+                for (self.proxies.items) |proxy| {
                     if (proxy.id == header.object) {
-                        break deserializeEvent(
-                            Event,
+                        return deserializeMessage(
+                            IncomingMessage,
                             header,
                             proxy.interface,
                             buf[0..msg_len],
                             conn,
                         );
                     }
-                } else continue;
-
-                switch (ev) {
-                    .wl_display => |disp_ev| try self.handleDisplayEvent(disp_ev),
-                    else => return ev,
                 }
             }
-        }
-
-        fn handleDisplayEvent(self: *Self, ev: anytype) !void {
-            switch (ev) {
-                .@"error" => |err| {
-                    const proxy = for (self.proxies.items) |proxy| {
-                        if (proxy.id == err.object_id) {
-                            break proxy;
-                        }
-                    } else Proxy{ .id = err.object_id, .interface = "object" };
-                    return handleDisplayError(proxy, err.code, err.message);
-                },
-                .delete_id => |id| {
-                    self.delObject(id.id);
-                    try self.ida.free(id.id);
-                },
-            }
-        }
-
-        fn handleDisplayError(
-            proxy: Proxy,
-            code: u32,
-            message: [:0]const u8,
-        ) error{ProtocolError} {
-            std.log.err("Protocol error: {s}(id {d}): code: {d}\n\t{s}.", .{
-                proxy.interface,
-                proxy.id,
-                code,
-                message,
-            });
-            return error.ProtocolError;
         }
     };
 }
 
-fn deserializeEvent(
-    comptime Event: type,
+fn deserializeMessage(
+    comptime Message: type,
     header: wire.Header,
     target_interface: [:0]const u8,
     bytes: []const u8,
     conn: *Connection,
-) Event {
+) Message {
     // This is arbitrary, but works for now.
     @setEvalBranchQuota(10000);
 
-    const ti = @typeInfo(Event).@"union";
+    const ti = @typeInfo(Message).@"union";
     inline for (ti.fields) |field| if (std.mem.eql(u8, field.name, target_interface)) {
         const sub_fields = @typeInfo(field.type).@"union".fields;
         // Since sub_fields cannot be indexed with a runtime value (header.opcode),
@@ -235,22 +190,19 @@ fn deserializeEvent(
                 // What could that even look like this far in?
                 for (0..fd_count) |fd_index| fds[fd_index] = conn.reader.nextFd().?;
 
-                // Deserialize the event packet and create an *Event struct
-                // (e.g. wayland.Display.DeleteIdEvent)
-                var event: sub_field.type = wire.deserializeEvent(sub_field.type, bytes, &fds);
+                // Deserialize the message packet and create an *Message struct
+                // (e.g. wayland.Display.DeleteIdMessage)
+                var message: sub_field.type = wire.deserializeMessage(sub_field.type, bytes, &fds);
 
                 // Since the target object is derived from the header,
                 // rather than the message signature, it is set after deserializing
-                const object_self_field = std.meta.fields(@TypeOf(event))[0];
-                @field(event, object_self_field.name) = @enumFromInt(header.object);
+                const object_self_field = std.meta.fields(@TypeOf(message))[0];
+                @field(message, object_self_field.name) = @enumFromInt(header.object);
 
-                // Initialize the interface-level event struct (e.g. protocol.Event.wl_display)
-                const interface_event = @unionInit(field.type, sub_field.name, event);
+                // Initialize the interface-level message struct (e.g. Message.wl_display)
+                const interface_message = @unionInit(field.type, sub_field.name, message);
 
-                // Initialize the top-level event (protocol.Event).
-                const global_event = @unionInit(Event, field.name, interface_event);
-
-                return global_event;
+                return @unionInit(Message, field.name, interface_message);
             },
             else => @panic("Invalid opcode."),
         }

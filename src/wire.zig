@@ -100,7 +100,7 @@ pub fn serializeArgs(
 }
 
 /// Deserialize `bytes` and `fds` into a `T`.
-pub fn deserializeEvent(
+pub fn deserializeMessage(
     comptime T: type,
     bytes: []const u8,
     fds: []const std.posix.fd_t,

@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const wayland_dep = b.dependency("wayland", .{});
     const wayland = wayland_dep.module("wayland_core");
-    // const wayland_protocol = wayland_dep.module("wayland_server_protocol");
+    const wayland_protocol = wayland_dep.module("wayland_server_protocol");
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -17,6 +17,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addImport("wayland", wayland);
-    // exe.root_module.addImport("wayland_protocol", wayland_protocol);
+    exe.root_module.addImport("wayland_protocol", wayland_protocol);
     b.installArtifact(exe);
 }

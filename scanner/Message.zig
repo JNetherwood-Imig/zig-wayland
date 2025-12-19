@@ -50,7 +50,7 @@ pub fn scan(gpa: Allocator, reader: *xml.Reader) !Message {
         .eof => return error.UnexpectedEof,
         .element_end => {
             const elem = reader.elementName();
-            if (!std.mem.eql(u8, elem, "request"))
+            if (!(std.mem.eql(u8, elem, "request") or std.mem.eql(u8, elem, "event")))
                 return error.UnexpectedElementEnd;
             break;
         },
@@ -98,7 +98,7 @@ pub fn emitIncomingMessage(
     const parent_entry = try map.get(interface);
 
     if (self.description) |d| try d.write(writer, "\t/// ");
-    try writer.print("\tpub const {s}Event = struct {{\n", .{name});
+    try writer.print("\tpub const {s}Message = struct {{\n", .{name});
     try writer.print("\t\tpub const _name = \"{s}\";\n", .{self.name});
     try writer.print("\t\tpub const _opcode = {d};\n", .{opcode});
     try writer.writeAll("\t\tpub const _signature = \"");
@@ -149,8 +149,8 @@ pub fn emitOutgoingMessage(
     defer gpa.free(fn_name);
 
     const max_length = self.calculateMaxLength();
-    try writer.print("\n\tpub const {s}_request_opcode = {d};\n", .{ self.name, opcode });
-    try writer.print("\tpub const {s}_request_length = {d};\n\n", .{ self.name, max_length });
+    try writer.print("\n\tpub const {s}_message_opcode = {d};\n", .{ self.name, opcode });
+    try writer.print("\tpub const {s}_message_length = {d};\n\n", .{ self.name, max_length });
 
     if (self.description) |d| try d.write(writer, "\t/// ");
     try for (self.args) |arg| switch (arg.type) {
@@ -184,7 +184,7 @@ fn writeNormal(
     for (self.args) |arg| try arg.write(gpa, writer, map);
     try writer.writeAll("\t) !void {\n");
     try writer.print(
-        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
         .{self.name},
     );
     const serialize_fn_name = try util.snakeToPascal(gpa, self.name);
@@ -235,7 +235,7 @@ fn writeConstructor(
 
     try writer.print("\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
     try writer.print(
-        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
         .{self.name},
     );
     try writer.print(
@@ -283,7 +283,7 @@ fn writeGenericConstructor(
     try writer.writeAll("\t) !T {\n");
     try writer.writeAll("\t\tconst new_id = try connection.ida.alloc();\n");
     try writer.print(
-        "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
+        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
         .{self.name},
     );
     try writer.print(
@@ -327,7 +327,7 @@ fn writeSerialize(
     try writer.writeAll("\t\treturn wire.serializeArgs(\n");
     try writer.writeAll("\t\t\tbuf,\n");
     try writer.writeAll("\t\t\tself.getId(),\n");
-    try writer.print("\t\t\t{s}_request_opcode,\n", .{self.name});
+    try writer.print("\t\t\t{s}_message_opcode,\n", .{self.name});
     if (self.args.len > 0) {
         try writer.writeAll("\t\t\t.{\n");
         for (self.args) |arg| switch (arg.type) {
@@ -362,7 +362,7 @@ fn calculateMaxLength(self: *const Message) usize {
 }
 
 fn fnName(self: *const Message, gpa: Allocator) ![]const u8 {
-    // Request name is a zig idenitfier, such as `error` or `type` and needs to be wrapped with @"..."
+    // Message name is a zig idenitfier, such as `error` or `type` and needs to be wrapped with @"..."
     if (!std.zig.isValidId(self.name))
         return self.fnNameInvalid(gpa);
 

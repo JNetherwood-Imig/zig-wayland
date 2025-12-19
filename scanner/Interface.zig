@@ -129,7 +129,7 @@ pub fn emitServerCode(
     writer: *std.Io.Writer,
     map: *const InterfaceMap,
 ) !void {
-    try self.emitCommon(gpa, writer);
+    try self.emitCommon(writer, map);
 
     for (self.requests, 0..) |request, opcode|
         try request.emitIncomingMessage(gpa, writer, map, self.name, opcode);
