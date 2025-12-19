@@ -1,6 +1,9 @@
 # Zig Wayland
 A wayland client (and soon server) implementation written entirely in zig with no dependencies.
 
+## WARNING
+This project is not ready to be used, AT ALL. The repo is only public because this is a school project.
+
 ## Differences from libwayland
 * Lower-level control over serialization and sending of events.
 * Far less memory allocations (zero heap allocations is possible for simple applications, see hello-wayland example)
