@@ -22,7 +22,7 @@ const Client = struct {
     }
 
     pub fn destroy(self: *Client, gpa: Allocator) void {
-        self.connection.close();
+        self.connection.deinit();
         self.ida_state.deinit();
         gpa.destroy(self);
     }

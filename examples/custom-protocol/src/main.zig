@@ -19,12 +19,12 @@ pub fn main() !void {
     var buffers = wayland.Connection.Buffers{};
 
     // Connecto to server
-    const conn_info = wayland.ConnectInfo.getDefault();
-    var conn = try conn_info.connect(ida, &buffers);
-    defer conn.close();
+    var sock_info: wayland.SocketInfo = .auto;
+    var conn = try sock_info.connect(ida, &buffers);
+    defer conn.deinit();
 
     // Initialize event handler with default capacity of 64 objects to be tracked
-    var handler = try EventHandler.initCapacity(gpa, 64);
+    var handler = try EventHandler.initCapacity(gpa, ida, 64);
     defer handler.deinit(gpa);
 
     const disp = try ida.createObject(wl.Display);
