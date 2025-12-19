@@ -1,0 +1,16 @@
+.{
+    .name = .wayland_hello_world,
+    .fingerprint = 0xdb9fa728c0027e91,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+    },
+
+    .dependencies = .{
+        .wayland = .{ .path = "../.." },
+    },
+}

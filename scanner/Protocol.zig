@@ -1,3 +1,10 @@
+const std = @import("std");
+const xml = @import("xml");
+const Description = @import("Description.zig");
+const Interface = @import("Interface.zig");
+const InterfaceMap = @import("InterfaceMap.zig");
+const Allocator = std.mem.Allocator;
+
 const Protocol = @This();
 
 prefix: []const u8,
@@ -64,20 +71,48 @@ pub fn deinit(self: *Protocol, gpa: Allocator) void {
     gpa.free(self.name);
 }
 
-pub fn write(
+pub fn emitClientCode(
     self: *const Protocol,
     gpa: Allocator,
     writer: *std.Io.Writer,
     map: *const InterfaceMap,
+    imports: []const []const u8,
 ) !void {
+    if (self.description) |d| {
+        try d.write(writer, "//! ");
+        try writer.writeAll("\n");
+    }
     if (self.copyright) |c| try writeCopyright(c, writer);
-    if (self.description) |d| try d.write(writer, "/// ");
-    try writer.print("pub const {s} = struct {{\n", .{self.name});
 
     for (self.interfaces.items) |interface|
         try interface.write(gpa, writer, map);
 
-    try writer.writeAll("};\n");
+    try writer.writeAll("const core = @import(\"core\");\n");
+    try writer.writeAll("const wire = core.wire;\n");
+    try writer.writeAll("const Connection = core.Connection;\n");
+    try writer.writeAll("const Fixed = core.Fixed;\n");
+    try writer.print("const {s} = @This();\n", .{self.name});
+    for (imports) |raw_import| {
+        const import = std.mem.sliceTo(std.fs.path.basename(raw_import), '.');
+        try writer.print("const {s} = @import(\"{s}\");\n", .{ import, import });
+    }
+
+    try writer.writeAll("test { @import(\"std\").testing.refAllDecls(@This()); }\n\n");
+}
+
+pub fn emitDepInfo(
+    self: *const Protocol,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+) !void {
+    for (self.interfaces.items) |interface| {
+        const entry = try map.get(interface.name);
+        try writer.print("{s} {s} {s}\n", .{
+            interface.name,
+            self.name,
+            entry.type_name,
+        });
+    }
 }
 
 fn parseCopyright(gpa: Allocator, reader: *xml.Reader) ![]const u8 {
@@ -103,13 +138,7 @@ fn writeCopyright(copyright: []const u8, writer: *std.Io.Writer) !void {
     var it = std.mem.tokenizeScalar(u8, copyright, '\n');
     while (it.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \t");
-        if (line.len > 0) try writer.print("// {s}\n", .{line});
+        if (line.len > 0) try writer.print("//! {s}\n", .{line});
     }
+    try writer.writeAll("\n");
 }
-
-const std = @import("std");
-const xml = @import("xml");
-const Description = @import("Description.zig");
-const Interface = @import("Interface.zig");
-const InterfaceMap = @import("InterfaceMap.zig");
-const Allocator = std.mem.Allocator;

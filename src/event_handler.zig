@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 /// Construct an event handler to handle events present in the `protocol` type.
 /// This makes it possible to generate code for custom protocols and pass the resulting type here
 /// to achieve full extensibility.
-pub fn EventHandler(comptime protocol: type) type {
+pub fn EventHandler(comptime Event: type) type {
     return struct {
         const Self = @This();
 
@@ -109,7 +109,7 @@ pub fn EventHandler(comptime protocol: type) type {
         pub fn getNextEvent(
             self: *const Self,
             connection: *Connection,
-        ) GetEventError!?protocol.Event {
+        ) GetEventError!?Event {
             return self.nextEvent(connection, false);
         }
 
@@ -117,7 +117,7 @@ pub fn EventHandler(comptime protocol: type) type {
         pub fn waitNextEvent(
             self: *const Self,
             connection: *Connection,
-        ) GetEventError!protocol.Event {
+        ) GetEventError!Event {
             while (true) {
                 if (try self.nextEvent(connection, true)) |ev| return ev;
             }
@@ -127,7 +127,7 @@ pub fn EventHandler(comptime protocol: type) type {
             self: *const Self,
             conn: *Connection,
             wait: bool,
-        ) GetEventError!?protocol.Event {
+        ) GetEventError!?Event {
             // Always start by flushing buffered messages
             conn.flush() catch |err| switch (err) {
                 error.BrokenPipe => {},
@@ -150,7 +150,7 @@ pub fn EventHandler(comptime protocol: type) type {
                 // event types and deserialize the event
                 for (self.proxies.items) |proxy| if (proxy.id == header.object) {
                     return deserializeEvent(
-                        protocol.Event,
+                        Event,
                         header,
                         proxy.interface,
                         buf[0..msg_len],

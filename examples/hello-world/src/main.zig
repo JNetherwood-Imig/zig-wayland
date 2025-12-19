@@ -1,10 +1,11 @@
 const std = @import("std");
 const wayland = @import("wayland");
-const protocol = @import("protocol");
-const wl = protocol.wayland;
-const xdg = protocol.xdg_shell;
-// Construct event handler type for default protocols
-const EventHandler = wayland.client.EventHandler(protocol);
+const wl = @import("wayland_protocol");
+const xdg = @import("xdg_shell");
+
+// Construct event type for protocols in use
+const Event = wayland.EventUnion(.{ wl, xdg });
+const EventHandler = wayland.EventHandler(Event);
 
 const width = 256;
 const height = 256;
@@ -29,7 +30,7 @@ pub fn main() !void {
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
     // Create connection using buffers
-    conn = try wayland.client.ConnectInfo.getDefault().connect(ida, &buffers);
+    conn = try wayland.ConnectInfo.getDefault().connect(ida, &buffers);
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;

@@ -31,6 +31,22 @@ pub fn put(
     try self.inner.put(gpa, key, value);
 }
 
+pub fn putRaw(
+    self: *InterfaceMap,
+    gpa: Allocator,
+    interface: []const u8,
+    protocol: []const u8,
+    type_name: []const u8,
+) !void {
+    const key = try gpa.dupe(u8, interface);
+    errdefer gpa.free(key);
+    const proto_dup = try gpa.dupe(u8, protocol);
+    errdefer gpa.free(proto_dup);
+    const type_dup = try gpa.dupe(u8, type_name);
+    errdefer gpa.free(type_dup);
+    try self.inner.put(gpa, key, .{ .protocol = proto_dup, .type_name = type_dup });
+}
+
 pub const Entry = struct {
     protocol: []const u8,
     type_name: []const u8,

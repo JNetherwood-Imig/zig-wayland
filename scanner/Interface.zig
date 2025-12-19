@@ -1,3 +1,14 @@
+const std = @import("std");
+const xml = @import("xml");
+const util = @import("util.zig");
+const InterfaceMap = @import("InterfaceMap.zig");
+const Description = @import("Description.zig");
+const Request = @import("Request.zig");
+const Event = @import("Event.zig");
+const Enum = @import("Enum.zig");
+const log = std.log.scoped(.scanner);
+const Allocator = std.mem.Allocator;
+
 const Interface = @This();
 
 name: []const u8,
@@ -102,16 +113,15 @@ pub fn write(
     const map_entry = try map.get(self.name);
     const type_name = map_entry.type_name;
 
-    if (self.description) |d| try d.write(writer, "\t/// ");
-    try writer.print("\tpub const {s} = enum(u32) {{\n", .{type_name});
-    try writer.writeAll("\t\tnull_handle = 0,\n");
-    try writer.writeAll("\t\t_,\n");
-    try writer.print("\t\tpub const interface = \"{s}\";\n", .{self.name});
-    try writer.writeAll("\t\tpub const Version = enum(u32) {\n");
-    for (0..self.version) |v| try writer.print("\t\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
-    try writer.writeAll("\t\t};\n");
+    if (self.description) |d| try d.write(writer, "/// ");
+    try writer.print("pub const {s} = enum(u32) {{\n", .{type_name});
+    try writer.writeAll("\tnull_handle = 0,\n\t_,\n\n");
+    try writer.print("\tpub const interface = \"{s}\";\n\n", .{self.name});
+    try writer.writeAll("\tpub const Version = enum(u32) {\n");
+    for (0..self.version) |v| try writer.print("\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
+    try writer.writeAll("\t};\n\n");
     try writer.print(
-        "\t\tpub fn getId(self: {s}) u32 {{\n\t\t\treturn @intFromEnum(self);\n\t\t}}\n",
+        "\tpub fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
         .{type_name},
     );
 
@@ -124,7 +134,7 @@ pub fn write(
     for (self.enums.items) |en|
         try en.write(gpa, writer);
 
-    try writer.writeAll("\t};\n");
+    try writer.writeAll("};\n\n");
 }
 
 pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]const u8 {
@@ -151,14 +161,3 @@ pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]c
 
     return util.snakeToPascal(gpa, stripped_name);
 }
-
-const std = @import("std");
-const xml = @import("xml");
-const util = @import("util.zig");
-const InterfaceMap = @import("InterfaceMap.zig");
-const Description = @import("Description.zig");
-const Request = @import("Request.zig");
-const Event = @import("Event.zig");
-const Enum = @import("Enum.zig");
-const log = std.log.scoped(.scanner);
-const Allocator = std.mem.Allocator;

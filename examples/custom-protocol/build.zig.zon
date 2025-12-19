@@ -1,0 +1,15 @@
+.{
+    .name = .custom_protocol,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x2d125b283e6f9ee6,
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "hyprland-surface-v1.xml",
+    },
+    .dependencies = .{
+        .wayland = .{ .path = "../.." },
+    },
+}
