@@ -1,6 +1,7 @@
 const std = @import("std");
 const wire = @import("wire.zig");
 const Connection = @import("Connection.zig");
+const IdAllocator = @import("IdAllocator.zig");
 const Allocator = std.mem.Allocator;
 
 /// Construct an event handler to handle events present in the `protocol` type.
@@ -12,6 +13,7 @@ pub fn EventHandler(comptime Event: type) type {
 
         /// List of currently tracked objects
         proxies: std.ArrayList(Proxy),
+        ida: IdAllocator,
 
         /// Tracks an object and its interface, used for decoding events
         pub const Proxy = struct {
@@ -20,15 +22,19 @@ pub fn EventHandler(comptime Event: type) type {
         };
 
         /// Initialize an unbounded event handler with an allocator and ititial capacity
-        pub fn initCapacity(gpa: Allocator, initial_capacity: usize) Allocator.Error!Self {
-            return .{ .proxies = try .initCapacity(gpa, initial_capacity) };
+        pub fn initCapacity(
+            gpa: Allocator,
+            ida: IdAllocator,
+            initial_capacity: usize,
+        ) Allocator.Error!Self {
+            return .{ .proxies = try .initCapacity(gpa, initial_capacity), .ida = ida };
         }
 
         /// Initialize a bounded event handler which does not invoke the heap.
         /// When initializing this way, always use addObjectBounded instead of addObject
         /// because an allocator cannot be used.
-        pub fn initBuffered(buffer: []Proxy) Self {
-            return .{ .proxies = .initBuffer(buffer) };
+        pub fn initBuffered(buffer: []Proxy, ida: IdAllocator) Self {
+            return .{ .proxies = .initBuffer(buffer), .ida = ida };
         }
 
         /// Free the underlying list of proxies if initialized using `initCapacity`
@@ -102,12 +108,15 @@ pub fn EventHandler(comptime Event: type) type {
             }
         }
 
-        pub const GetEventError = Connection.FlushError || Connection.PollEventsError;
+        pub const GetEventError = Connection.FlushError ||
+            Connection.PollEventsError ||
+            IdAllocator.FreeError ||
+            error{ProtocolError};
 
         /// Try to get an event from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
         pub fn getNextEvent(
-            self: *const Self,
+            self: *Self,
             connection: *Connection,
         ) GetEventError!?Event {
             return self.nextEvent(connection, false);
@@ -115,7 +124,7 @@ pub fn EventHandler(comptime Event: type) type {
 
         /// Wait indefinately for an event to be received.
         pub fn waitNextEvent(
-            self: *const Self,
+            self: *Self,
             connection: *Connection,
         ) GetEventError!Event {
             while (true) {
@@ -124,7 +133,7 @@ pub fn EventHandler(comptime Event: type) type {
         }
 
         fn nextEvent(
-            self: *const Self,
+            self: *Self,
             conn: *Connection,
             wait: bool,
         ) GetEventError!?Event {
@@ -148,16 +157,54 @@ pub fn EventHandler(comptime Event: type) type {
 
                 // When we find the appropriate proxy, use its interface to lookup the associated
                 // event types and deserialize the event
-                for (self.proxies.items) |proxy| if (proxy.id == header.object) {
-                    return deserializeEvent(
-                        Event,
-                        header,
-                        proxy.interface,
-                        buf[0..msg_len],
-                        conn,
-                    );
-                };
+                const ev = for (self.proxies.items) |proxy| {
+                    if (proxy.id == header.object) {
+                        break deserializeEvent(
+                            Event,
+                            header,
+                            proxy.interface,
+                            buf[0..msg_len],
+                            conn,
+                        );
+                    }
+                } else continue;
+
+                switch (ev) {
+                    .wl_display => |disp_ev| try self.handleDisplayEvent(disp_ev),
+                    else => return ev,
+                }
             }
+        }
+
+        fn handleDisplayEvent(self: *Self, ev: anytype) !void {
+            switch (ev) {
+                .@"error" => |err| {
+                    const proxy = for (self.proxies.items) |proxy| {
+                        if (proxy.id == err.object_id) {
+                            break proxy;
+                        }
+                    } else Proxy{ .id = err.object_id, .interface = "object" };
+                    return handleDisplayError(proxy, err.code, err.message);
+                },
+                .delete_id => |id| {
+                    self.delObject(id.id);
+                    try self.ida.free(id.id);
+                },
+            }
+        }
+
+        fn handleDisplayError(
+            proxy: Proxy,
+            code: u32,
+            message: [:0]const u8,
+        ) error{ProtocolError} {
+            std.log.err("Protocol error: {s}(id {d}): code: {d}\n\t{s}.", .{
+                proxy.interface,
+                proxy.id,
+                code,
+                message,
+            });
+            return error.ProtocolError;
         }
     };
 }

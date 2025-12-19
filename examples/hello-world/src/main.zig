@@ -29,17 +29,19 @@ pub fn main() !void {
 
     // Shortcut for creating stack buffers used by connection
     var buffers = wayland.Connection.Buffers{};
-    // Create connection using buffers
+
     var sock_info: wayland.SocketInfo = .auto;
     conn = sock_info.connect(ida, &buffers) catch |err| {
         std.log.err("Failed to connect to {f}.", .{sock_info});
         return err;
     };
+    defer conn.deinit();
+
     std.log.info("Connected to {f}.", .{sock_info});
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;
-    var handler = EventHandler.initBuffered(&proxy_buf);
+    var handler = EventHandler.initBuffered(&proxy_buf, ida);
 
     // Create display to bootstrap object creation
     disp = try ida.createObject(wl.Display);
@@ -77,7 +79,8 @@ pub fn main() !void {
         },
         else => std.log.err("Unexpected event: {any}.", .{event}),
     } else |e| return e;
-    // Make sure we bound to all globals by comparing to null_handle type that each interface has
+
+    // Make sure we bound to all globals
     std.debug.assert(comp != .null_handle and shm != .null_handle and wm_base != .null_handle);
 
     // Create and register wl_surface, xdg_surface, and xdg_toplevel
@@ -105,17 +108,6 @@ pub fn main() !void {
         .xdg_toplevel => |ev| switch (ev) {
             .close => break,
             else => {},
-        },
-        .wl_display => |ev| switch (ev) {
-            .@"error" => return error.ProtocolError,
-            .delete_id => |id| {
-                // IMPORTANT: Object IDs are not automatically freed,
-                // since the wl_display.delete_id event is not handled internally.
-                // Thus, the server will immediately terminate the client connection
-                // if IDs are not correctly freed
-                handler.delObject(id.id);
-                try ida.free(id.id);
-            },
         },
         else => {},
     } else |e| return e;

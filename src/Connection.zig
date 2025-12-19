@@ -27,8 +27,9 @@ pub fn init(handle: posix.fd_t, ida: IdAllocator, buffers: *Buffers) Connection 
 }
 
 /// Close the underlying connection file descriptor.
-pub fn close(self: *Connection) void {
+pub fn deinit(self: *Connection) void {
     posix.close(self.handle);
+    self.* = undefined;
 }
 
 pub const FlushError = Writer.FlushError;
