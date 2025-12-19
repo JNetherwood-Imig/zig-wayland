@@ -1,6 +1,7 @@
-//! 1.45
+//! Last updated to wayland-protocols version 1.45
+//! 18 December 2025
 
-pub const linux_dmabuf = .{
+pub const linux_dmabuf_v1 = .{
     .subpath = "linux-dmabuf/linux-dmabuf-v1.xml",
     .strip_prefix = "zwp",
     .imports = &.{"wayland"},

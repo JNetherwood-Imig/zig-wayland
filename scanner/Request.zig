@@ -100,7 +100,7 @@ pub fn write(
         else => continue,
     } else self.writeNormal(gpa, writer, map, parent_interface_entry.type_name, fn_name);
 
-    try self.writeSerialize(gpa, writer, map, parent_interface_entry.type_name, fn_name);
+    try self.writeSerialize(gpa, writer, map, parent_interface_entry.type_name);
 }
 
 fn writeNormal(
@@ -128,10 +128,9 @@ fn writeNormal(
         "\t\tvar message_buffer: [{s}_request_length]u8 = undefined;\n",
         .{self.name},
     );
-    try writer.print(
-        "\t\tconst serialized_len = self.serialize{c}{s}(\n",
-        .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
-    );
+    const serialize_fn_name = try util.snakeToPascal(gpa, self.name);
+    defer gpa.free(serialize_fn_name);
+    try writer.print("\t\tconst serialized_len = self.serialize{s}(\n", .{serialize_fn_name});
     try writer.writeAll("\t\t\t&message_buffer,\n");
     for (self.args.items) |arg| if (arg.type != .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
     try writer.writeAll("\t\t);\n");
@@ -258,12 +257,10 @@ fn writeSerialize(
     writer: *std.Io.Writer,
     map: *const InterfaceMap,
     interface_type: []const u8,
-    fn_name: []const u8,
 ) !void {
-    try writer.print(
-        "\tfn serialize{c}{s}(\n",
-        .{ std.ascii.toUpper(fn_name[0]), fn_name[1..] },
-    );
+    const fn_name = try util.snakeToPascal(gpa, self.name);
+    defer gpa.free(fn_name);
+    try writer.print("\tfn serialize{s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{interface_type});
     try writer.writeAll("\t\tbuf: []u8,\n");
     for (self.args.items) |arg| if (arg.type != .fd) try arg.write(gpa, writer, map);

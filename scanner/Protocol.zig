@@ -96,6 +96,8 @@ pub fn emitClientCode(
         const import = std.mem.sliceTo(std.fs.path.basename(raw_import), '.');
         try writer.print("const {s} = @import(\"{s}\");\n", .{ import, import });
     }
+
+    try writer.writeAll("test { @import(\"std\").testing.refAllDecls(@This()); }\n\n");
 }
 
 pub fn emitDepInfo(

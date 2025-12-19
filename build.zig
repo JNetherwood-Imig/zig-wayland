@@ -38,9 +38,10 @@ pub fn build(b: *std.Build) void {
     const gen_dep_step = b.step("deps", "Generate dependency information for protocols.");
     gen_dep_step.dependOn(&dep_dir.step);
 
-    const test_core = b.addTest(.{ .root_module = core });
+    const core_tests = b.addTest(.{ .root_module = core });
+    const run_core_tests = b.addRunArtifact(core_tests);
     const test_step = b.step("test", "Test everything!!!");
-    test_step.dependOn(&test_core.step);
+    test_step.dependOn(&run_core_tests.step);
 
     writeCodeSet(
         b,
@@ -95,19 +96,19 @@ pub fn build(b: *std.Build) void {
         "unstable",
         .client,
     );
-    // writeCodeSet(
-    //     b,
-    //     target,
-    //     optimize,
-    //     core,
-    //     test_step,
-    //     scanner,
-    //     dep_dir,
-    //     wayland_protocols_dep,
-    //     protocol.wlr,
-    //     "unstable",
-    //     .client,
-    // );
+    writeCodeSet(
+        b,
+        target,
+        optimize,
+        core,
+        test_step,
+        scanner,
+        dep_dir,
+        wlr_protocols_dep,
+        protocol.wlr,
+        "unstable",
+        .client,
+    );
 }
 
 fn writeCodeSet(
@@ -178,7 +179,8 @@ fn writeCode(
         mod.addImport(import, b.modules.get(import ++ "_" ++ @tagName(side) ++ "_protocol").?);
     }
     const test_exe = b.addTest(.{ .root_module = mod });
-    test_step.dependOn(&test_exe.step);
+    const run_test_exe = b.addRunArtifact(test_exe);
+    test_step.dependOn(&run_test_exe.step);
 }
 
 fn writeDepSet(
