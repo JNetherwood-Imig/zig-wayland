@@ -69,9 +69,9 @@ pub fn main() !void {
     defer writer.flush() catch {};
 
     switch (mode) {
+        .client => try protocol.emitClientCode(gpa, writer, &map, imports.items),
+        .server => return error.Unimplemented,
         .dep_info => try protocol.emitDepInfo(writer, &map),
-        .client_code => try protocol.emitClientCode(gpa, writer, &map, imports.items),
-        .server_code => return error.Unimplemented,
     }
 }
 
@@ -109,7 +109,7 @@ fn addImportsToMap(gpa: Allocator, map: *InterfaceMap, imports: []const []const 
 }
 
 const Mode = enum {
+    client,
+    server,
     dep_info,
-    client_code,
-    server_code,
 };

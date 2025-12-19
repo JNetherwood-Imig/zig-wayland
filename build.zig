@@ -2,7 +2,7 @@ const std = @import("std");
 const protocol = @import("build/protocol.zig");
 
 pub fn build(b: *std.Build) void {
-    const xml = b.dependency("xml", .{});
+    const xml_dep = b.dependency("xml", .{});
     const wayland_dep = b.dependency("wayland", .{});
     const wayland_protocols_dep = b.dependency("wayland_protocols", .{});
     const wlr_protocols_dep = b.dependency("wlr_protocols", .{});
@@ -10,12 +10,85 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const scanner = makeScanner(b, target, optimize, xml_dep);
+
+    const test_step = b.step("test", "Test core functions and perform " ++
+        "semantic analysis on whole codebase, plus generated protocols.");
+
     const core = b.addModule("wayland_core", .{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/wayland_core.zig"),
     });
+    const core_tests = b.addTest(.{ .root_module = core });
+    const run_core_tests = b.addRunArtifact(core_tests);
+    test_step.dependOn(&run_core_tests.step);
 
+    const dep_dir = makeProtocolDeps(
+        b,
+        scanner,
+        wayland_dep,
+        wayland_protocols_dep,
+        wlr_protocols_dep,
+    );
+
+    makeProtocols(
+        b,
+        target,
+        optimize,
+        core,
+        test_step,
+        dep_dir,
+        scanner,
+        wayland_dep,
+        wayland_protocols_dep,
+        wlr_protocols_dep,
+    );
+}
+
+pub const ProtocolSide = enum { client, server };
+
+pub fn generateDependencyInfo(
+    b: *std.Build,
+    scanner: *std.Build.Step.Compile,
+    protocol_xml: std.Build.LazyPath,
+    prefix_to_strip: []const u8,
+    output_file_name: []const u8,
+) std.Build.LazyPath {
+    const run_scanner = b.addRunArtifact(scanner);
+    run_scanner.addArg("dep_info");
+    run_scanner.addFileArg(protocol_xml);
+    run_scanner.addArgs(&.{ "-p", prefix_to_strip, "-o" });
+    return run_scanner.addOutputFileArg(output_file_name);
+}
+
+pub fn generateProtocol(
+    b: *std.Build,
+    scanner: *std.Build.Step.Compile,
+    protocol_xml: std.Build.LazyPath,
+    prefix_to_strip: []const u8,
+    output_file_name: []const u8,
+    imports: []const std.Build.LazyPath,
+    side: ProtocolSide,
+) std.Build.LazyPath {
+    const run_scanner = b.addRunArtifact(scanner);
+    run_scanner.addArg(@tagName(side));
+    run_scanner.addFileArg(protocol_xml);
+    run_scanner.addArgs(&.{ "-p", prefix_to_strip });
+    for (imports) |import| {
+        run_scanner.addArg("-i");
+        run_scanner.addFileArg(import);
+    }
+    run_scanner.addArg("-o");
+    return run_scanner.addOutputFileArg(output_file_name);
+}
+
+fn makeScanner(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    xml_dep: *std.Build.Dependency,
+) *std.Build.Step.Compile {
     const scanner = b.addExecutable(.{
         .name = "scanner",
         .root_module = b.createModule(.{
@@ -24,126 +97,28 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("scanner/scanner.zig"),
         }),
     });
-    scanner.root_module.addImport("xml", xml.module("xml"));
+    scanner.root_module.addImport("xml", xml_dep.module("xml"));
     b.installArtifact(scanner);
+    return scanner;
+}
 
+fn makeProtocolDeps(
+    b: *std.Build,
+    scanner: *std.Build.Step.Compile,
+    wayland_dep: *std.Build.Dependency,
+    wayland_protocols_dep: *std.Build.Dependency,
+    wlr_protocols_dep: *std.Build.Dependency,
+) *std.Build.Step.WriteFile {
     const dep_dir = b.addWriteFiles();
-
-    writeDepSet(b, dep_dir, scanner, wayland_dep, protocol.core, "protocol");
-    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.stable, "stable");
-    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.staging, "staging");
-    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.unstable, "unstable");
-    writeDepSet(b, dep_dir, scanner, wlr_protocols_dep, protocol.wlr, "unstable");
-
-    const gen_dep_step = b.step("deps", "Generate dependency information for protocols.");
-    gen_dep_step.dependOn(&dep_dir.step);
-
-    const core_tests = b.addTest(.{ .root_module = core });
-    const run_core_tests = b.addRunArtifact(core_tests);
-    const test_step = b.step("test", "Test everything!!!");
-    test_step.dependOn(&run_core_tests.step);
-
-    writeCodeSet(
-        b,
-        target,
-        optimize,
-        core,
-        test_step,
-        scanner,
-        dep_dir,
-        wayland_dep,
-        protocol.core,
-        "protocol",
-        .client,
-    );
-
-    writeCodeSet(
-        b,
-        target,
-        optimize,
-        core,
-        test_step,
-        scanner,
-        dep_dir,
-        wayland_protocols_dep,
-        protocol.stable,
-        "stable",
-        .client,
-    );
-    writeCodeSet(
-        b,
-        target,
-        optimize,
-        core,
-        test_step,
-        scanner,
-        dep_dir,
-        wayland_protocols_dep,
-        protocol.staging,
-        "staging",
-        .client,
-    );
-    writeCodeSet(
-        b,
-        target,
-        optimize,
-        core,
-        test_step,
-        scanner,
-        dep_dir,
-        wayland_protocols_dep,
-        protocol.unstable,
-        "unstable",
-        .client,
-    );
-    writeCodeSet(
-        b,
-        target,
-        optimize,
-        core,
-        test_step,
-        scanner,
-        dep_dir,
-        wlr_protocols_dep,
-        protocol.wlr,
-        "unstable",
-        .client,
-    );
+    writeDepSet(b, dep_dir, scanner, wayland_dep, protocol.core);
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.stable);
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.staging);
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.unstable);
+    writeDepSet(b, dep_dir, scanner, wlr_protocols_dep, protocol.wlr);
+    return dep_dir;
 }
 
-fn writeCodeSet(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    core: *std.Build.Module,
-    test_step: *std.Build.Step,
-    scanner: *std.Build.Step.Compile,
-    dep_dir: *std.Build.Step.WriteFile,
-    protocol_source: *std.Build.Dependency,
-    comptime protocol_set: type,
-    comptime subdir: []const u8,
-    comptime side: Side,
-) void {
-    inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
-        const protocol_field = @field(protocol_set, decl.name);
-        writeCode(
-            b,
-            target,
-            optimize,
-            core,
-            test_step,
-            dep_dir,
-            scanner,
-            protocol_source.path(subdir).path(b, protocol_field.subpath),
-            protocol_field.strip_prefix,
-            decl.name,
-            protocol_field.imports,
-            side,
-        );
-    }
-}
-
-fn writeCode(
+fn makeProtocols(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
@@ -151,36 +126,17 @@ fn writeCode(
     test_step: *std.Build.Step,
     dep_dir: *std.Build.Step.WriteFile,
     scanner: *std.Build.Step.Compile,
-    input_path: std.Build.LazyPath,
-    prefix: []const u8,
-    comptime name: []const u8,
-    comptime imports: []const []const u8,
-    comptime side: Side,
+    wl: *std.Build.Dependency,
+    wlp: *std.Build.Dependency,
+    wlr: *std.Build.Dependency,
 ) void {
-    const output_name = name ++ "_" ++ @tagName(side) ++ "_protocol";
-    const run_scanner = b.addRunArtifact(scanner);
-    run_scanner.addArg(@tagName(side) ++ "_code");
-    run_scanner.addFileArg(input_path);
-    run_scanner.addArgs(&.{ "-p", prefix });
-    run_scanner.addArg("-o");
-    const output = run_scanner.addOutputFileArg(name ++ ".zig");
-    inline for (imports) |import| {
-        run_scanner.addArg("-i");
-        const path = dep_dir.getDirectory().path(b, import ++ ".dep");
-        run_scanner.addFileArg(path);
+    inline for (.{ProtocolSide.client}) |side| {
+        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wl, protocol.core, side);
+        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.stable, side);
+        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.staging, side);
+        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.unstable, side);
+        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlr, protocol.wlr, side);
     }
-    const mod = b.addModule(output_name, .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = output,
-    });
-    mod.addImport("core", core);
-    inline for (imports) |import| {
-        mod.addImport(import, b.modules.get(import ++ "_" ++ @tagName(side) ++ "_protocol").?);
-    }
-    const test_exe = b.addTest(.{ .root_module = mod });
-    const run_test_exe = b.addRunArtifact(test_exe);
-    test_step.dependOn(&run_test_exe.step);
 }
 
 fn writeDepSet(
@@ -189,36 +145,64 @@ fn writeDepSet(
     scanner: *std.Build.Step.Compile,
     protocol_source: *std.Build.Dependency,
     comptime protocol_set: type,
-    comptime subdir: []const u8,
 ) void {
     inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
         const protocol_field = @field(protocol_set, decl.name);
-        writeDep(
+        const generated = generateDependencyInfo(
             b,
-            dep_dir,
             scanner,
-            protocol_source.path(subdir).path(b, protocol_field.subpath),
+            protocol_source.path(protocol_field.subpath),
             protocol_field.strip_prefix,
-            decl.name,
+            decl.name ++ ".dep",
         );
+        _ = dep_dir.addCopyFile(generated, decl.name ++ ".dep");
     }
 }
 
-fn writeDep(
+fn writeCodeSet(
     b: *std.Build,
-    dep_dir: *std.Build.Step.WriteFile,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    wayland_core: *std.Build.Module,
+    test_step: *std.Build.Step,
     scanner: *std.Build.Step.Compile,
-    input_path: std.Build.LazyPath,
-    prefix: []const u8,
-    comptime name: []const u8,
+    dep_dir: *std.Build.Step.WriteFile,
+    protocol_source: *std.Build.Dependency,
+    comptime protocol_set: type,
+    comptime side: ProtocolSide,
 ) void {
-    const run_scanner = b.addRunArtifact(scanner);
-    run_scanner.addArg("dep_info");
-    run_scanner.addFileArg(input_path);
-    run_scanner.addArgs(&.{ "-p", prefix });
-    run_scanner.addArg("-o");
-    const output = run_scanner.addOutputFileArg(name ++ ".dep");
-    _ = dep_dir.addCopyFile(output, name ++ ".dep");
-}
+    inline for (@typeInfo(protocol_set).@"struct".decls) |decl| {
+        const protocol_field = @field(protocol_set, decl.name);
 
-const Side = enum { client, server };
+        const import_type = @typeInfo(@TypeOf(protocol_field.imports)).pointer.child;
+        var imports: [std.meta.fields(import_type).len]std.Build.LazyPath = undefined;
+        inline for (protocol_field.imports, 0..) |import, i| {
+            imports[i] = dep_dir.getDirectory().path(b, import ++ ".dep");
+        }
+
+        const generated = generateProtocol(
+            b,
+            scanner,
+            protocol_source.path(protocol_field.subpath),
+            protocol_field.strip_prefix,
+            decl.name ++ ".zig",
+            &imports,
+            .client,
+        );
+
+        const mod = b.addModule(decl.name ++ "_" ++ @tagName(side) ++ "_protocol", .{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = generated,
+        });
+        mod.addImport("core", wayland_core);
+        inline for (protocol_field.imports) |import| mod.addImport(
+            import,
+            b.modules.get(import ++ "_" ++ @tagName(side) ++ "_protocol").?,
+        );
+
+        const test_exe = b.addTest(.{ .root_module = mod });
+        const run_test_exe = b.addRunArtifact(test_exe);
+        test_step.dependOn(&run_test_exe.step);
+    }
+}
