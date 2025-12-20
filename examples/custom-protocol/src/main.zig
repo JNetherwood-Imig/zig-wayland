@@ -2,8 +2,8 @@ const std = @import("std");
 const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
 const hyprland = @import("hyprland_surface");
-const Event = wayland.EventUnion(.{ wl, hyprland });
-const EventHandler = wayland.EventHandler(Event);
+const Event = wayland.MessageUnion(.{ wl, hyprland });
+const EventHandler = wayland.MessageHandler(Event);
 
 pub fn main() !void {
     var gpa_state: std.heap.DebugAllocator(.{}) = .init;
@@ -24,7 +24,7 @@ pub fn main() !void {
     defer conn.deinit();
 
     // Initialize event handler with default capacity of 64 objects to be tracked
-    var handler = try EventHandler.initCapacity(gpa, ida, 64);
+    var handler = try EventHandler.initCapacity(gpa, 64);
     defer handler.deinit(gpa);
 
     const disp = try ida.createObject(wl.Display);
@@ -39,7 +39,7 @@ pub fn main() !void {
     var comp: wl.Compositor = .null_handle;
     var surface_mgr: hyprland.SurfaceManager = .null_handle;
 
-    while (handler.waitNextEvent(&conn)) |ev| switch (ev) {
+    while (handler.waitNextMessage(&conn)) |ev| switch (ev) {
         .wl_registry => |reg_ev| switch (reg_ev) {
             .global => |glob| {
                 if (std.mem.eql(u8, glob.interface, wl.Compositor.interface)) {
