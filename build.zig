@@ -23,9 +23,29 @@ pub fn build(b: *std.Build) void {
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
     test_step.dependOn(&run_core_tests.step);
+
+    const doc_generator = b.addExecutable(.{
+        .name = "gen-docs",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("build/generate_docs.zig"),
+        }),
+    });
+    const gen_docs = b.addRunArtifact(doc_generator);
+    const docs = gen_docs.addOutputFileArg("docs.zig");
+
+    const doc_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = docs,
+    });
+
+    doc_mod.addImport("wayland_core", core);
+
     const doc_object = b.addObject(.{
-        .name = "wayland_core",
-        .root_module = core,
+        .name = "docs",
+        .root_module = doc_mod,
     });
     const install_docs = b.addInstallDirectory(.{
         .source_dir = doc_object.getEmittedDocs(),
@@ -50,6 +70,7 @@ pub fn build(b: *std.Build) void {
         optimize,
         core,
         test_step,
+        doc_mod,
         dep_dir,
         scanner,
         wayland_dep,
@@ -136,6 +157,7 @@ fn makeProtocols(
     optimize: std.builtin.OptimizeMode,
     core: *std.Build.Module,
     test_step: *std.Build.Step,
+    doc_mod: *std.Build.Module,
     dep_dir: *std.Build.Step.WriteFile,
     scanner: *std.Build.Step.Compile,
     wl: *std.Build.Dependency,
@@ -143,11 +165,11 @@ fn makeProtocols(
     wlr: *std.Build.Dependency,
 ) void {
     inline for (.{ ProtocolSide.client, ProtocolSide.server }) |side| {
-        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wl, protocol.core, side);
-        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.stable, side);
-        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.staging, side);
-        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlp, protocol.unstable, side);
-        writeCodeSet(b, target, optimize, core, test_step, scanner, dep_dir, wlr, protocol.wlr, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wl, protocol.core, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.stable, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.staging, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.unstable, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlr, protocol.wlr, side);
     }
 }
 
@@ -178,6 +200,7 @@ fn writeCodeSet(
     optimize: std.builtin.OptimizeMode,
     wayland_core: *std.Build.Module,
     test_step: *std.Build.Step,
+    doc_mod: *std.Build.Module,
     scanner: *std.Build.Step.Compile,
     dep_dir: *std.Build.Step.WriteFile,
     protocol_source: *std.Build.Dependency,
@@ -203,7 +226,8 @@ fn writeCodeSet(
             side,
         );
 
-        const mod = b.addModule(decl.name ++ "_" ++ @tagName(side) ++ "_protocol", .{
+        const name = decl.name ++ "_" ++ @tagName(side) ++ "_protocol";
+        const mod = b.addModule(name, .{
             .target = target,
             .optimize = optimize,
             .root_source_file = generated,
@@ -217,5 +241,11 @@ fn writeCodeSet(
         const test_exe = b.addTest(.{ .root_module = mod });
         const run_test_exe = b.addRunArtifact(test_exe);
         test_step.dependOn(&run_test_exe.step);
+
+        doc_mod.addAnonymousImport(name, .{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = generated,
+        });
     }
 }

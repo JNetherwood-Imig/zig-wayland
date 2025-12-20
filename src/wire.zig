@@ -79,12 +79,12 @@ pub const GenericNewId = struct {
 };
 
 /// Serialize `args` to `buffer`, encoding `object` and `opcode` in the header.
-pub fn serializeArgs(
+pub fn serializeMessage(
     buffer: []u8,
     object: u32,
     opcode: u16,
     args: anytype,
-) u16 {
+) usize {
     const length = calculateArgsLength(args);
     std.mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]).* = .{
         .object = object,

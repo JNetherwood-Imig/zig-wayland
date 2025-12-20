@@ -155,9 +155,17 @@ fn parseCopyright(gpa: Allocator, reader: *xml.Reader) ![]const u8 {
 
 fn writeCopyright(copyright: []const u8, writer: *std.Io.Writer) !void {
     var it = std.mem.tokenizeScalar(u8, copyright, '\n');
+    while (it.peek()) |peek| {
+        if (peek.len == 0) _ = it.next() else break;
+    }
     while (it.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \t");
-        if (line.len > 0) try writer.print("//! {s}\n", .{line});
+        if (line.len == 0) {
+            if (it.peek() != null) try writer.writeAll("//!\n");
+        } else try writer.print("//! {s}\n", .{line});
+
+        // The copyright declarations need extra space to be interpreted correctly by autodoc.
+        if (std.mem.startsWith(u8, line, "Copyright ©")) try writer.writeAll("//! \n");
     }
     try writer.writeAll("\n");
 }

@@ -37,10 +37,15 @@ pub fn deinit(self: Description, gpa: Allocator) void {
 
 pub fn write(self: *const Description, writer: *std.Io.Writer, prefix: []const u8) !void {
     if (self.body) |body| {
-        var it = std.mem.tokenizeScalar(u8, body, '\n');
+        var it = std.mem.splitScalar(u8, body, '\n');
+        while (it.peek()) |peek| {
+            if (peek.len == 0) _ = it.next() else break;
+        }
         while (it.next()) |raw_line| {
             const line = std.mem.trim(u8, raw_line, " \t");
-            if (line.len > 0) try writer.print("{s}{s}\n", .{ prefix, line });
+            if (line.len == 0) {
+                if (it.peek() != null) try writer.print("{s}\n", .{prefix});
+            } else try writer.print("{s}{s}\n", .{ prefix, line });
         }
     } else try printSummary(self.summary, prefix, writer);
 }
