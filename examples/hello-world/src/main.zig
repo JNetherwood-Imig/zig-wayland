@@ -4,8 +4,8 @@ const wl = @import("wayland_protocol");
 const xdg = @import("xdg_shell");
 
 // Construct event type for protocols in use
-const Event = wayland.IncomingMessageUnion(.{ wl, xdg });
-const EventHandler = wayland.IncomingMessageHandler(Event);
+const Event = wayland.MessageUnion(.{ wl, xdg });
+const EventHandler = wayland.MessageHandler(Event);
 
 const width = 256;
 const height = 256;
@@ -57,7 +57,11 @@ pub fn main() !void {
     try handler.addObjectBounded(sync_cb);
 
     while (handler.waitNextMessage(&conn)) |event| switch (event) {
-        .wl_callback => break, // Indicates that all globals have been received
+        .wl_callback => |cb| { // Indicates that all globals have been received
+            const data = cb.done.callback_data;
+            std.log.debug("Sync callback data: {d}.", .{data});
+            break;
+        },
         .wl_registry => |ev| switch (ev) {
             .global => |g| {
                 // Bind to globals
