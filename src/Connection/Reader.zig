@@ -20,7 +20,7 @@ pub fn init(socket: posix.fd_t, data_buf: []u8, fd_buf: []posix.fd_t) Reader {
     };
 }
 
-pub const ReadIncomingError = RecvMsgError;
+pub const ReadIncomingError = RecvMsgError || error{ConnectionClosed};
 
 pub fn readIncoming(self: *Reader) ReadIncomingError!void {
     var buf: [4096]u8 = undefined;
@@ -36,6 +36,7 @@ pub fn readIncoming(self: *Reader) ReadIncomingError!void {
         .flags = 0,
     };
     const read = try recvmsg(self.socket, &msg, 0);
+    if (read == 0) return error.ConnectionClosed;
     std.debug.assert(self.data.putMany(buf[0..read]) == read);
     var header = cmsg.firstHeader(&msg);
     while (header) |h| {
