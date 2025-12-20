@@ -113,10 +113,10 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader) !Arg {
     };
 }
 
-pub fn deinit(self: *Arg, gpa: Allocator) void {
-    gpa.free(self.name);
+pub fn deinit(self: Arg, gpa: Allocator) void {
+    if (self.description) |desc| desc.deinit(gpa);
     if (self.summary) |sum| gpa.free(sum);
-    if (self.description) |*desc| desc.deinit(gpa);
+    gpa.free(self.name);
 
     switch (self.type) {
         inline .@"enum", .object, .optional_object, .new_id => |str| gpa.free(str),

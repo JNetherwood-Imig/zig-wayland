@@ -22,7 +22,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Protocol 
     errdefer gpa.free(name);
 
     var description: ?Description = null;
-    errdefer if (description) |*desc| desc.deinit(gpa);
+    errdefer if (description) |desc| desc.deinit(gpa);
 
     var copyright: ?[]const u8 = null;
     errdefer if (copyright) |c| gpa.free(c);
@@ -63,7 +63,7 @@ pub fn parse(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Protocol 
 }
 
 pub fn deinit(self: *Protocol, gpa: Allocator) void {
-    if (self.description) |*d| d.deinit(gpa);
+    if (self.description) |d| d.deinit(gpa);
     if (self.copyright) |c| gpa.free(c);
     for (self.interfaces.items) |*i| i.deinit(gpa);
     self.interfaces.deinit(gpa);
@@ -83,10 +83,29 @@ pub fn emitClientCode(
         try writer.writeAll("\n");
     }
     if (self.copyright) |c| try writeCopyright(c, writer);
-
     for (self.interfaces.items) |interface|
-        try interface.write(gpa, writer, map);
+        try interface.emitClientCode(gpa, writer, map);
+    try self.emitFooter(writer, imports);
+}
 
+pub fn emitServerCode(
+    self: *const Protocol,
+    gpa: Allocator,
+    writer: *std.Io.Writer,
+    map: *const InterfaceMap,
+    imports: []const []const u8,
+) !void {
+    if (self.description) |d| {
+        try d.write(writer, "//! ");
+        try writer.writeAll("\n");
+    }
+    if (self.copyright) |c| try writeCopyright(c, writer);
+    for (self.interfaces.items) |interface|
+        try interface.emitServerCode(gpa, writer, map);
+    try self.emitFooter(writer, imports);
+}
+
+fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []const u8) !void {
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
@@ -136,9 +155,17 @@ fn parseCopyright(gpa: Allocator, reader: *xml.Reader) ![]const u8 {
 
 fn writeCopyright(copyright: []const u8, writer: *std.Io.Writer) !void {
     var it = std.mem.tokenizeScalar(u8, copyright, '\n');
+    while (it.peek()) |peek| {
+        if (peek.len == 0) _ = it.next() else break;
+    }
     while (it.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \t");
-        if (line.len > 0) try writer.print("//! {s}\n", .{line});
+        if (line.len == 0) {
+            if (it.peek() != null) try writer.writeAll("//!\n");
+        } else try writer.print("//! {s}\n", .{line});
+
+        // The copyright declarations need extra space to be interpreted correctly by autodoc.
+        if (std.mem.startsWith(u8, line, "Copyright ©")) try writer.writeAll("//! \n");
     }
     try writer.writeAll("\n");
 }

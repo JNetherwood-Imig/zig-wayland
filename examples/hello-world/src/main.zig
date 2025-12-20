@@ -4,8 +4,8 @@ const wl = @import("wayland_protocol");
 const xdg = @import("xdg_shell");
 
 // Construct event type for protocols in use
-const Event = wayland.EventUnion(.{ wl, xdg });
-const EventHandler = wayland.EventHandler(Event);
+const Event = wayland.MessageUnion(.{ wl, xdg });
+const EventHandler = wayland.MessageHandler(Event);
 
 const width = 256;
 const height = 256;
@@ -41,7 +41,7 @@ pub fn main() !void {
 
     // Create event handler backed by stack buffer
     var proxy_buf: [16]EventHandler.Proxy = undefined;
-    var handler = EventHandler.initBuffered(&proxy_buf, ida);
+    var handler = EventHandler.initBuffered(&proxy_buf);
 
     // Create display to bootstrap object creation
     disp = try ida.createObject(wl.Display);
@@ -56,8 +56,12 @@ pub fn main() !void {
     const sync_cb = try disp.sync(&conn);
     try handler.addObjectBounded(sync_cb);
 
-    while (handler.waitNextEvent(&conn)) |event| switch (event) {
-        .wl_callback => break, // Indicates that all globals have been received
+    while (handler.waitNextMessage(&conn)) |event| switch (event) {
+        .wl_callback => |cb| { // Indicates that all globals have been received
+            const data = cb.done.callback_data;
+            std.log.debug("Sync callback data: {d}.", .{data});
+            break;
+        },
         .wl_registry => |ev| switch (ev) {
             .global => |g| {
                 // Bind to globals
@@ -94,7 +98,7 @@ pub fn main() !void {
     try surf.commit(&conn);
 
     // Main loop
-    while (handler.waitNextEvent(&conn)) |event| switch (event) {
+    while (handler.waitNextMessage(&conn)) |event| switch (event) {
         .xdg_wm_base => |ev| try wm_base.pong(&conn, ev.ping.serial),
         .xdg_surface => |ev| {
             try xdg_surf.ackConfigure(&conn, ev.configure.serial);
@@ -108,6 +112,13 @@ pub fn main() !void {
         .xdg_toplevel => |ev| switch (ev) {
             .close => break,
             else => {},
+        },
+        .wl_display => |ev| switch (ev) {
+            .delete_id => |id| {
+                handler.delObject(id.id);
+                try ida.free(id.id);
+            },
+            .@"error" => return error.ProtocolError,
         },
         else => {},
     } else |e| return e;

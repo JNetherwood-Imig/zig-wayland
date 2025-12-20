@@ -2,11 +2,12 @@
 
 pub const wire = @import("wire.zig");
 pub const Connection = @import("Connection.zig");
+pub const Server = @import("Server.zig");
 pub const Fixed = @import("Fixed.zig");
 pub const IdAllocator = @import("IdAllocator.zig");
-pub const EventHandler = @import("event_handler.zig").EventHandler;
 pub const SocketInfo = @import("socket_info.zig").SocketInfo;
-pub const EventUnion = @import("event_union.zig").EventUnion;
+pub const MessageUnion = @import("message_union.zig").MessageUnion;
+pub const MessageHandler = @import("message_handler.zig").MessageHandler;
 
 test {
     @import("std").testing.refAllDeclsRecursive(@This());
