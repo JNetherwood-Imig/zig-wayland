@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const gen_docs = b.addRunArtifact(doc_generator);
-    const docs = gen_docs.addOutputFileArg("docs.zig");
+    const docs = gen_docs.addOutputFileArg("wayland.zig");
 
     const doc_mod = b.createModule(.{
         .target = target,
@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     doc_mod.addImport("wayland_core", core);
 
     const doc_object = b.addObject(.{
-        .name = "docs",
+        .name = "wayland",
         .root_module = doc_mod,
     });
     const install_docs = b.addInstallDirectory(.{
