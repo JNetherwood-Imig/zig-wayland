@@ -1,6 +1,6 @@
 const Type = @import("std").builtin.Type;
 
-pub fn IncomingMessageUnion(comptime protocols: anytype) type {
+pub fn MessageUnion(comptime protocols: anytype) type {
     var backing_enum = Type.Enum{
         .decls = &.{},
         .fields = &.{},

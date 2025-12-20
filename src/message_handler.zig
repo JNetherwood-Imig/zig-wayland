@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 /// Construct a message handler to handle messages present in the `protocol` type.
 /// This makes it possible to generate code for custom protocols and pass the resulting type here
 /// to achieve full extensibility.
-pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
+pub fn MessageHandler(comptime Message: type) type {
     return struct {
         const Self = @This();
 
@@ -109,7 +109,7 @@ pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
         pub fn getNextMessage(
             self: *Self,
             connection: *Connection,
-        ) GetMessageError!?IncomingMessage {
+        ) GetMessageError!?Message {
             return self.nextMessage(connection, false);
         }
 
@@ -117,7 +117,7 @@ pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
         pub fn waitNextMessage(
             self: *Self,
             connection: *Connection,
-        ) GetMessageError!IncomingMessage {
+        ) GetMessageError!Message {
             while (true) {
                 if (try self.nextMessage(connection, true)) |ev| return ev;
             }
@@ -127,7 +127,7 @@ pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
             self: *Self,
             conn: *Connection,
             wait: bool,
-        ) GetMessageError!?IncomingMessage {
+        ) GetMessageError!?Message {
             // Always start by flushing buffered messages
             conn.flush() catch |err| switch (err) {
                 error.BrokenPipe => {},
@@ -151,7 +151,7 @@ pub fn IncomingMessageHandler(comptime IncomingMessage: type) type {
                 for (self.proxies.items) |proxy| {
                     if (proxy.id == header.object) {
                         return deserializeMessage(
-                            IncomingMessage,
+                            Message,
                             header,
                             proxy.interface,
                             buf[0..msg_len],
