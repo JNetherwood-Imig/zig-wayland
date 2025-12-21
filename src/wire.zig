@@ -6,6 +6,9 @@ const builtin = @import("builtin");
 const native_endian = builtin.target.cpu.arch.endian();
 const Fixed = @import("Fixed.zig");
 
+pub const libwayland_max_message_length = 4096;
+pub const libwayland_max_message_args = 20;
+
 /// Two-word message header containing target object id, message opcode, and length in bytes,
 /// including the header.
 pub const Header = switch (native_endian) {

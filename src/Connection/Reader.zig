@@ -1,7 +1,7 @@
 //! FIX: rewrite once I rewrite the ring buffer.
 
 const std = @import("std");
-const cmsg = @import("../cmsg.zig");
+const cmsg = @import("cmsg.zig");
 const wire = @import("../wire.zig");
 const posix = std.posix;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
