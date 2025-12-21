@@ -13,13 +13,13 @@ const height = 256;
 // State variables
 var configured: bool = false;
 var conn: wayland.Connection = undefined;
-var disp = wl.Display.null_handle;
-var reg = wl.Registry.null_handle;
-var comp = wl.Compositor.null_handle;
-var shm = wl.Shm.null_handle;
-var wm_base = xdg.WmBase.null_handle;
+var disp: wl.Display = .invalid;
+var reg: wl.Registry = .invalid;
+var comp: wl.Compositor = .invalid;
+var shm: wl.Shm = .invalid;
+var wm_base: xdg.WmBase = .invalid;
+var surf: wl.Surface = .invalid;
 var shm_data: []align(4096) u8 = &.{};
-var surf = wl.Surface.null_handle;
 
 pub fn main() !void {
     // Create ID allocator backed by small buffer
@@ -85,7 +85,7 @@ pub fn main() !void {
     } else |e| return e;
 
     // Make sure we bound to all globals
-    std.debug.assert(comp != .null_handle and shm != .null_handle and wm_base != .null_handle);
+    std.debug.assert(comp != .invalid and shm != .invalid and wm_base != .invalid);
 
     // Create and register wl_surface, xdg_surface, and xdg_toplevel
     surf = try comp.createSurface(&conn);

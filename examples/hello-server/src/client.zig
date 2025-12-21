@@ -47,6 +47,8 @@ pub fn main() !void {
 fn handleRegistryEvent(ev: std.meta.fieldInfo(Event, .wl_registry).type) !void {
     switch (ev) {
         .global => |glob| {
+            // FIXME?: Formatted messages over 64 characters are fucked,
+            // I don't think that's my problem.
             log.info("Global: {d}: {s} (version {d}).", .{
                 glob.name,
                 glob.interface,

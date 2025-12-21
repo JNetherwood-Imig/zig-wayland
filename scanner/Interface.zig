@@ -153,7 +153,7 @@ fn emitCommon(
     const type_name = map_entry.type_name;
     if (self.description) |d| try d.write(writer, "/// ");
     try writer.print("pub const {s} = enum(u32) {{\n", .{type_name});
-    try writer.writeAll("\tnull_handle = 0,\n\t_,\n\n");
+    try writer.writeAll("\tinvalid = 0,\n\t_,\n\n");
     try writer.print("\tpub const interface = \"{s}\";\n\n", .{self.name});
     try writer.writeAll("\tpub const Version = enum(u32) {\n");
     for (0..self.version) |v| try writer.print("\t\tv{d} = {d},\n", .{ v + 1, v + 1 });

@@ -148,17 +148,15 @@ pub fn MessageHandler(comptime Message: type) type {
 
                 // When we find the appropriate proxy, use its interface to lookup the associated
                 // message types and deserialize the message
-                for (self.proxies.items) |proxy| {
-                    if (proxy.id == header.object) {
-                        return deserializeMessage(
-                            Message,
-                            header,
-                            proxy.interface,
-                            buf[0..msg_len],
-                            conn,
-                        );
-                    }
-                }
+                for (self.proxies.items) |proxy| if (proxy.id == header.object) {
+                    return deserializeMessage(
+                        Message,
+                        header,
+                        proxy.interface,
+                        buf[0..msg_len],
+                        conn,
+                    );
+                };
             }
         }
     };

@@ -60,7 +60,7 @@ pub inline fn firstHeader(message: *const posix.msghdr) ?*const Header {
 
 /// Returns a pointer to the next control header after `cmsg` associated with `message`,
 /// or `null` of `cmsg` is the last header.
-/// Based on glibc __cmsg_nxthdr (see https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/cmsg_nxthdr.c)
+/// Based on glibc [__cmsg_nxthdr](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/cmsg_nxthdr.c)
 pub inline fn nextHeader(message: *const posix.msghdr, cmsg: *const Header) ?*const Header {
     const control_ptr: [*]align(alignment) const u8 = @ptrCast(@alignCast(message.control.?));
     const cmsg_ptr: [*]align(alignment) const u8 = @ptrCast(cmsg);

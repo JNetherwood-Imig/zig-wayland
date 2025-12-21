@@ -64,14 +64,14 @@ pub const Array = struct {
 /// A new id argument whose interface and version cannot be determined from the xml,
 /// and therefore must be prefixed by this information.
 pub const GenericNewId = struct {
-    interface: String,
+    interface: [:0]const u8,
     version: u32,
     new_id: u32,
 
     /// Initialize a generic new id from the params that will be present in codegen.
     pub fn init(comptime T: type, version: T.Version, new_id: u32) GenericNewId {
         return .{
-            .interface = .init(T.interface),
+            .interface = T.interface,
             .version = @intFromEnum(version),
             .new_id = new_id,
         };
@@ -96,46 +96,6 @@ pub fn serializeMessage(
     inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |f|
         index += serializeArg(buffer[index..], @field(args, f.name));
 
-    return length;
-}
-
-/// Deserialize `bytes` and `fds` into a `T`.
-pub fn deserializeMessage(
-    comptime T: type,
-    bytes: []const u8,
-    fds: []const std.posix.fd_t,
-) T {
-    const signature = T._signature;
-    var event: T = undefined;
-    var index: usize = 0;
-    var fd_index: usize = 0;
-
-    switch (@typeInfo(T)) {
-        .@"struct" => |s| inline for (s.fields[1..], 0..) |field, sig_index| {
-            const sig_byte = signature[sig_index];
-            if (sig_byte != 'd') {
-                const val, const size = deserializeArg(field.type, sig_byte, bytes[index..]);
-                @field(event, field.name) = val;
-                index += size;
-            } else {
-                @field(event, field.name) = fds[fd_index];
-                fd_index += 1;
-            }
-        },
-        else => @compileError("Expected args to be a struct or tuple."),
-    }
-
-    return event;
-}
-
-fn calculateArgsLength(args: anytype) u16 {
-    var length: u16 = 8;
-    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| switch (field.type) {
-        String, Array => length += @intCast(@field(args, field.name).padded_len + 4),
-        GenericNewId => length += @intCast((@field(args, field.name).interface.padded_len + 12)),
-        ?String => length += if (@field(args, field.name)) |s| @intCast(s.padded_len + 4) else 4,
-        else => length += 4,
-    };
     return length;
 }
 
@@ -194,7 +154,7 @@ fn serializeString(buffer: []u8, string: ?String) usize {
 }
 
 fn serializeGenericNewId(buffer: []u8, new_id: GenericNewId) usize {
-    var written = serializeString(buffer, new_id.interface);
+    var written = serializeString(buffer, String.init(new_id.interface));
     written += serializeUint(buffer[written..], new_id.version);
     return written + serializeUint(buffer[written..], new_id.new_id);
 }
@@ -205,94 +165,137 @@ fn serializeArray(buffer: []u8, array: Array) usize {
     return written + array.padded_len;
 }
 
-/// Deserialize a single arg of type `T` from `bytes` where `sig_byte` comes from the `_signature`
-/// from codegen and is used to disambiguate types.
-fn deserializeArg(comptime T: type, comptime sig_byte: u8, bytes: []const u8) struct { T, usize } {
+fn calculateArgsLength(args: anytype) u16 {
+    var length: u16 = 8;
+    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| switch (field.type) {
+        String, Array => length += @intCast(@field(args, field.name).padded_len + 4),
+        GenericNewId => length += @intCast((roundup4(@field(args, field.name).interface.len) + 12)),
+        ?String => length += if (@field(args, field.name)) |s| @intCast(s.padded_len + 4) else 4,
+        else => length += 4,
+    };
+    return length;
+}
+
+/// Deserialize `bytes` and `fds` into a `T`.
+pub fn deserializeMessage(
+    comptime T: type,
+    bytes: []const u8,
+    fds: []const std.posix.fd_t,
+) T {
+    const signature = T._signature;
+    var event: T = undefined;
+    var index: usize = 0;
+    var fd_index: usize = 0;
+
     switch (@typeInfo(T)) {
-        // We have an int, which can only be an i32 or u32.
-        .int => {
-            comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u');
-            const val = std.mem.bytesToValue(T, bytes[0..@sizeOf(T)]);
-            return .{ val, @sizeOf(T) };
-        },
-        // We have a struct, which could either be a `Fixed`, or some packed struct(u32) from
-        // codegen representing a bitfield enum.
-        .@"struct" => switch (sig_byte) {
-            'f' => { // fixed
-                const val = Fixed{ .data = std.mem.bytesToValue(i32, bytes[0..@sizeOf(i32)]) };
-                return .{ val, @sizeOf(i32) };
-            },
-            'u' => { // bitfield
-                const val = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
-                return .{ @bitCast(val), @sizeOf(u32) };
-            },
-            'g' => { // generic new id
-                var idx: usize = 0;
-                const interface_len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
-                idx += 4;
-                const interface: [:0]const u8 = @ptrCast(bytes[idx..][0 .. interface_len - 1]);
-                idx += roundup4(interface_len);
-                const version = std.mem.bytesToValue(u32, bytes[idx..][0..@sizeOf(u32)]);
-                idx += 4;
-                const new_id = std.mem.bytesToValue(u32, bytes[idx..][0..@sizeOf(u32)]);
-                idx += 4;
-                const val = GenericNewId{
-                    .interface = .init(interface),
-                    .version = version,
-                    .new_id = new_id,
-                };
-                return .{ val, idx };
-            },
-            else => unreachable,
-        },
-        // We have an object or enum (not bitfield).
-        .@"enum" => |e| {
-            comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
-            const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
-            return .{ val, @sizeOf(e.tag_type) };
-        },
-        // We have either a string or array.
-        .pointer => |p| {
-            const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
-            if (p.sentinel_ptr != null) {
-                // Its a string
-                const val: [:0]const u8 = @ptrCast(bytes[4 .. len + 3]);
-                return .{ val, roundup4(len) + @sizeOf(u32) };
-            } else {
-                // Its an array
-                const val: []const u8 = bytes[4 .. len + 4];
-                return .{ val, roundup4(len) + @sizeOf(u32) };
+        .@"struct" => |s| inline for (s.fields[1..], signature) |field, sig_byte| {
+            if (sig_byte == 'd') { // field is an fd
+                @field(event, field.name) = fds[fd_index];
+                fd_index += 1;
+                continue;
             }
+
+            const val, const size = deserializeField(field.type, bytes[index..]);
+            @field(event, field.name) = val;
+            index += size;
         },
-        // We have either an optional string or optional object.
-        .optional => |o| {
-            switch (@typeInfo(o.child)) {
-                // Its an object
-                .@"enum" => |e| {
-                    comptime std.debug.assert(sig_byte == 'i' or sig_byte == 'u' or sig_byte == 'o' or sig_byte == 'n');
-                    const val: T = @enumFromInt(std.mem.bytesToValue(e.tag_type, bytes[0..@sizeOf(e.tag_type)]));
-                    return .{ val, @sizeOf(e.tag_type) };
-                },
-                // Its a string
-                .pointer => |p| {
-                    const len = std.mem.bytesToValue(u32, bytes[0..@sizeOf(u32)]);
-                    if (p.sentinel_ptr != null) {
-                        const val: [:0]const u8 = @ptrCast(bytes[0 .. len - 1]);
-                        return .{ val, len + @sizeOf(u32) };
-                    } else {
-                        const val: []const u8 = bytes[0..len];
-                        return .{ val, len + @sizeOf(u32) };
-                    }
-                },
-                else => {
-                    @compileError(std.fmt.comptimePrint("Unexpected optional type: {s}", .{@typeName(T)}));
-                },
-            }
-        },
-        else => {
-            @compileError(std.fmt.comptimePrint("Unexpected type: {s}", .{@typeName(T)}));
-        },
+        else => @compileError("Expected args to be a struct or tuple."),
     }
+
+    return event;
+}
+
+/// Deserialize a single field of type `T` from `data`
+/// Returns the element, `T`, and the bytes consumed
+fn deserializeField(comptime T: type, data: []const u8) struct { T, usize } {
+    return switch (@typeInfo(T)) {
+        .int => switch (T) {
+            i32 => deserializeInt(data),
+            u32 => deserializeUint(data),
+            else => @compileError("Expected int arg to be 32 bits."),
+        },
+        .@"enum" => deserializeEnum(T, data),
+        .@"struct" => switch (T) {
+            GenericNewId => deserializeGenericNewId(data),
+            Fixed => deserializeFixed(data),
+            else => deserializeBitfield(T, data),
+        },
+        .pointer => switch (T) {
+            [:0]const u8 => deserializeString(data),
+            []const u8 => deserializeArray(data),
+            else => @compileError("Invalid pointer type in incoming message."),
+        },
+        .optional => |o| switch (o.child) {
+            [:0]const u8 => deserializeOptionalString(data),
+            else => deserializeOptionalObject(o.child, data),
+        },
+        else => @compileError(std.fmt.comptimePrint("Unexpected arg type: {s}", .{@typeName(T)})),
+    };
+}
+
+fn deserializeInt(data: []const u8) struct { i32, usize } {
+    return .{ std.mem.bytesToValue(i32, data[0..4]), 4 };
+}
+
+fn deserializeUint(data: []const u8) struct { u32, usize } {
+    return .{ std.mem.bytesToValue(u32, data[0..4]), 4 };
+}
+
+fn deserializeFixed(data: []const u8) struct { Fixed, usize } {
+    const raw, _ = deserializeInt(data);
+    return .{ .{ .data = raw }, 4 };
+}
+
+fn deserializeArray(data: []const u8) struct { []const u8, usize } {
+    const len, _ = deserializeUint(data);
+    return .{ data[4..][0..len], 4 + roundup4(len) };
+}
+
+fn deserializeString(data: []const u8) struct { [:0]const u8, usize } {
+    const len, _ = deserializeUint(data);
+    return .{ @ptrCast(data[4..][0 .. len - 1]), 4 + roundup4(len) };
+}
+
+fn deserializeOptionalString(data: []const u8) struct { ?[:0]const u8, usize } {
+    const len, _ = deserializeUint(data);
+    if (len == 0) return .{ null, 4 };
+
+    return .{ @ptrCast(data[4..][0 .. len - 1]), 4 + roundup4(len) };
+}
+
+fn deserializeGenericNewId(data: []const u8) struct { GenericNewId, usize } {
+    const interface, const len = deserializeString(data);
+    const version, _ = deserializeUint(data[len..]);
+    const new_id, _ = deserializeUint(data[len..][4..]);
+
+    return .{
+        .{
+            .interface = interface,
+            .version = version,
+            .new_id = new_id,
+        },
+        len + 8,
+    };
+}
+
+fn deserializeBitfield(comptime T: type, data: []const u8) struct { T, usize } {
+    const val, const len = deserializeUint(data);
+    return .{ @bitCast(val), len };
+}
+
+fn deserializeEnum(comptime T: type, data: []const u8) struct { T, usize } {
+    const val, const len = switch (@typeInfo(T).@"enum".tag_type) {
+        i32 => deserializeInt(data),
+        u32 => deserializeUint(data),
+        else => @compileError("Unexpected enum tag type."),
+    };
+    return .{ @enumFromInt(val), len };
+}
+
+fn deserializeOptionalObject(comptime T: type, data: []const u8) struct { ?T, usize } {
+    const val, const len = deserializeUint(data);
+    if (val == 0) return .{ null, len };
+    return .{ @enumFromInt(val), len };
 }
 
 fn roundup4(value: anytype) @TypeOf(value) {
