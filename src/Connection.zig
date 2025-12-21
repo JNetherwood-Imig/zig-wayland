@@ -5,7 +5,7 @@ const wire = @import("wire.zig");
 const cmsg = @import("Connection/cmsg.zig");
 const IdAllocator = @import("IdAllocator.zig");
 const Reader = @import("Connection/Reader.zig");
-const Writer = @import("Connection/Writer2.zig");
+const Writer = @import("Connection/Writer.zig");
 const posix = std.posix;
 
 const Connection = @This();
