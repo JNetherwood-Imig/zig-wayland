@@ -2,6 +2,7 @@ const std = @import("std");
 const wire = @import("wire.zig");
 const Connection = @import("Connection.zig");
 const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.wayland);
 
 /// Construct a message handler to handle messages present in the `protocol` type.
 /// This makes it possible to generate code for custom protocols and pass the resulting type here
@@ -102,25 +103,19 @@ pub fn MessageHandler(comptime Message: type) type {
             }
         }
 
-        pub const GetMessageError = Connection.FlushError || Connection.PollEventsError;
+        pub const GetMessageError = Connection.FlushError ||
+            Connection.PollEventsError ||
+            error{TargetObjectNotFound};
 
         /// Try to get an message from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
-        pub fn getNextMessage(
-            self: *Self,
-            connection: *Connection,
-        ) GetMessageError!?Message {
+        pub fn getNextMessage(self: *Self, connection: *Connection) GetMessageError!?Message {
             return self.nextMessage(connection, false);
         }
 
         /// Wait indefinately for an message to be received.
-        pub fn waitNextMessage(
-            self: *Self,
-            connection: *Connection,
-        ) GetMessageError!Message {
-            while (true) {
-                if (try self.nextMessage(connection, true)) |ev| return ev;
-            }
+        pub fn waitNextMessage(self: *Self, connection: *Connection) GetMessageError!Message {
+            while (true) if (try self.nextMessage(connection, true)) |ev| return ev;
         }
 
         fn nextMessage(
@@ -134,29 +129,37 @@ pub fn MessageHandler(comptime Message: type) type {
                 else => |e| return e,
             };
 
-            while (true) {
+            outer: while (true) {
                 // Try to get a header, otherwise poll for messages,
                 // returning null if polling times out
-                const header = conn.reader.nextHeader() orelse {
-                    if (!try conn.pollEvents(wait)) return null;
-                    continue;
+                const header = conn.peekHeader() orelse {
+                    conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
+                        error.TimedOut => return null,
+                        else => |e| return e,
+                    };
+                    continue :outer;
                 };
 
-                const msg_len = header.length - @sizeOf(wire.Header);
-                var buf: [4096]u8 = undefined;
-                std.debug.assert(conn.reader.getData(buf[0..msg_len]) == msg_len);
+                const message = conn.peekBytes(header.length) orelse {
+                    conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
+                        error.TimedOut => return null,
+                        else => |e| return e,
+                    };
+                    continue :outer;
+                };
+                const body = message[@sizeOf(wire.Header)..];
 
                 // When we find the appropriate proxy, use its interface to lookup the associated
                 // message types and deserialize the message
                 for (self.proxies.items) |proxy| if (proxy.id == header.object) {
-                    return deserializeMessage(
-                        Message,
-                        header,
-                        proxy.interface,
-                        buf[0..msg_len],
-                        conn,
-                    );
+                    return deserializeMessage(Message, header, proxy.interface, body, conn) orelse
+                        continue :outer;
                 };
+                log.err("Got message for untracked object {d} (opcode {d}).", .{
+                    header.object,
+                    header.opcode,
+                });
+                return error.TargetObjectNotFound;
             }
         }
     };
@@ -168,7 +171,7 @@ fn deserializeMessage(
     target_interface: [:0]const u8,
     bytes: []const u8,
     conn: *Connection,
-) Message {
+) ?Message {
     // This is arbitrary, but works for now.
     @setEvalBranchQuota(10000);
 
@@ -182,15 +185,17 @@ fn deserializeMessage(
                 const sub_field = sub_fields[i];
 
                 // Get fds from connection
-                const fd_count = comptime countFds(sub_field.type);
-                var fds: [fd_count]std.posix.fd_t = undefined;
-                // FIXME: Is there good reason to handle the null case gracefully?
-                // What could that even look like this far in?
-                for (0..fd_count) |fd_index| fds[fd_index] = conn.reader.nextFd().?;
+                const fd_count = countFds(sub_field.type);
+                const fds = conn.peekFds(fd_count) orelse return null;
+
+                // At this point, all possible read failures have been passed,
+                // so we can finally discard consumed bytes.
+                conn.discardBytes(header.length);
+                conn.discardFds(fd_count);
 
                 // Deserialize the message packet and create an *Message struct
                 // (e.g. wayland.Display.DeleteIdMessage)
-                var message: sub_field.type = wire.deserializeMessage(sub_field.type, bytes, &fds);
+                var message: sub_field.type = wire.deserializeMessage(sub_field.type, bytes, fds);
 
                 // Since the target object is derived from the header,
                 // rather than the message signature, it is set after deserializing
@@ -217,4 +222,10 @@ fn countFds(comptime T: type) usize {
         if (byte == 'f') count += 1;
     }
     return count;
+}
+
+test {
+    const Message = @import("message_union.zig").MessageUnion(.{});
+    const Handler = MessageHandler(Message);
+    std.testing.refAllDeclsRecursive(Handler);
 }

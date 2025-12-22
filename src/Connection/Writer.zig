@@ -11,7 +11,7 @@ socket: std.posix.fd_t,
 /// Aligned to 4 bytes because the Wayland wire is encoded as 32 bit words.
 buf: []align(4) u8,
 /// Marks used space in wire data buffer.
-end: usize,
+end: usize = 0,
 
 /// The buffer into which control data is encoded.
 /// Must be at least able to store a `cmsg.Header` and one or more fds.
@@ -30,7 +30,6 @@ pub fn init(
     var self = Writer{
         .socket = socket,
         .buf = buf,
-        .end = 0,
         .control = control,
     };
     // Start by resetting the buffer, initializes `control` with a valid
@@ -113,22 +112,21 @@ pub fn flush(self: *Writer) FlushError!void {
     // This is blocking, maybe it shouldn't be?
     const sent = try std.posix.sendmsg(self.socket, &msg, 0);
 
-    // The sendmsg returned successfully, but wrote nothing because the other end of the
-    // connection was closed, so we should return an error to avoid another function busy-looping
-    // because it expects either successful completion of the send or otherwise an error.
+    // If sendmsg returns successfully, but has sent no data, that indicates that the other end of
+    // the connection was closed.
     if (sent == 0) return error.ConnectionClosed;
 
     // Reset data buffer end pos and control header len.
     self.reset();
 }
 
+fn controlHeader(self: *Writer) *cmsg.Header {
+    return std.mem.bytesAsValue(cmsg.Header, self.control[0..@sizeOf(cmsg.Header)]);
+}
+
 fn reset(self: *Writer) void {
     self.end = 0;
     self.controlHeader().* = .{ .len = cmsg.length(0) };
-}
-
-fn controlHeader(self: *Writer) *cmsg.Header {
-    return std.mem.bytesAsValue(cmsg.Header, self.control[0..@sizeOf(cmsg.Header)]);
 }
 
 test "init" {

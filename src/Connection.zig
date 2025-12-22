@@ -67,37 +67,58 @@ pub fn sendMessageWithFds(
     try self.writer.putFds(fds);
 }
 
-pub const PollEventsError = posix.PollError || Reader.ReadIncomingError;
+pub const PollEventsError = posix.PollError || Reader.ReadIncomingError || error{TimedOut};
 
-/// Poll for events on the socket file descriptor and read incoming messages.
-/// Stores incoming data and file descriptors in their respective ring buffers to be popped later
-/// without performing another read.
-/// Returns immediately if `wait` is false, otherwise it will wait indefinately.
-pub fn pollEvents(self: *Connection, wait: bool) PollEventsError!bool {
+/// Polls for events, returning `error.TimedOut` if nothing is received after `timeout` ms.
+/// If `timeout` is -1, it will poll indefinately.
+pub fn pollEvents(self: *Connection, timeout: i32) PollEventsError!void {
     var pfd = posix.pollfd{
         .fd = self.handle,
         .events = posix.POLL.IN,
         .revents = 0,
     };
+
     // If we get no signaled fds before timing out, return false
-    if (try posix.poll((&pfd)[0..1], if (wait) -1 else 0) == 0) return false;
-    // We have data, so read it into the buffer
+    if (try posix.poll((&pfd)[0..1], timeout) == 0)
+        return error.TimedOut;
+
     try self.reader.readIncoming();
-    return true;
+}
+
+pub fn peekHeader(self: *Connection) ?wire.Header {
+    if (self.reader.peek(@sizeOf(wire.Header))) |buf| {
+        return std.mem.bytesToValue(wire.Header, buf);
+    }
+
+    return null;
+}
+
+pub fn peekBytes(self: *Connection, n: usize) ?[]const u8 {
+    return self.reader.peek(n);
+}
+
+pub fn discardBytes(self: *Connection, n: usize) void {
+    self.reader.discard(n);
+}
+
+pub fn peekFds(self: *Connection, n: usize) ?[]const posix.fd_t {
+    return self.reader.peekFds(n);
+}
+
+pub fn discardFds(self: *Connection, n: usize) void {
+    self.reader.discardFds(n);
 }
 
 /// Utility struct to ease the process of creating backing buffers to be used by the connection.
-/// These are created on the stack because the reasonably can be,
-/// but they can be manually created in whatever way the user pleases.
-/// This struct creates buffers that hold the libwayland-imposed maximum message size worth of data
-/// and the libwayland maximum closure argument count worth of file descriptors.
+/// This leverages libwayland-imposed restrictions on the size of messages to avoid heap allocation.
 pub const Buffers = struct {
     data_in: [wire.libwayland_max_message_size]u8 align(4) = @splat(0),
     data_out: [wire.libwayland_max_message_size]u8 align(4) = @splat(0),
-    fds_in: [wire.libwayland_max_message_args]posix.fd_t align(8) = @splat(-1),
+    fds_in: [wire.libwayland_max_message_args]posix.fd_t = @splat(-1),
     fds_out: [cmsg.space(wire.libwayland_max_message_args)]u8 align(8) = @splat(0),
 };
 
 test {
     _ = Writer;
+    _ = Reader;
 }

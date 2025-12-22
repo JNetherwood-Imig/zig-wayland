@@ -36,8 +36,8 @@ pub fn main() !void {
     const sync_cb = try disp.sync(&conn);
     try handler.addObject(gpa, sync_cb);
 
-    var comp: wl.Compositor = .null_handle;
-    var surface_mgr: hyprland.SurfaceManager = .null_handle;
+    var comp: wl.Compositor = .invalid;
+    var surface_mgr: hyprland.SurfaceManager = .invalid;
 
     while (handler.waitNextMessage(&conn)) |ev| switch (ev) {
         .wl_registry => |reg_ev| switch (reg_ev) {
@@ -58,7 +58,14 @@ pub fn main() !void {
         else => {},
     } else |err| return err;
 
-    std.debug.assert(comp != .null_handle and surface_mgr != .null_handle);
+    std.debug.assert(comp != .invalid);
+
+    if (surface_mgr == .invalid) {
+        std.log.err("Could not find {s} global. Are you running Hyprland?", .{
+            hyprland.SurfaceManager.interface,
+        });
+        return error.SurfaceManagerNotFound;
+    }
 
     const surface = try comp.createSurface(&conn);
     const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, surface);

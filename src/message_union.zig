@@ -83,3 +83,8 @@ fn InterfaceMessageUnion(comptime Interface: type) ?type {
     message_union.tag_type = @Type(.{ .@"enum" = backing_enum });
     return @Type(.{ .@"union" = message_union });
 }
+
+test {
+    const Message = MessageUnion(.{});
+    @import("std").testing.refAllDeclsRecursive(Message);
+}

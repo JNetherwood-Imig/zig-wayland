@@ -74,6 +74,7 @@ pub fn main() !void {
                 } else if (std.mem.eql(u8, g.interface, wl.Shm.interface)) {
                     // Shm events can also be discarded
                     shm = try reg.bind(&conn, wl.Shm, .v1, g.name);
+                    try handler.addObjectBounded(shm);
                 } else if (std.mem.eql(u8, g.interface, xdg.WmBase.interface)) {
                     wm_base = try reg.bind(&conn, xdg.WmBase, .v1, g.name);
                     try handler.addObjectBounded(wm_base);
@@ -104,6 +105,7 @@ pub fn main() !void {
             try xdg_surf.ackConfigure(&conn, ev.configure.serial);
             if (!configured) {
                 const buffer = try createBuffer();
+                try handler.addObjectBounded(buffer);
                 try surf.attach(&conn, buffer, 0, 0);
             }
             try surf.commit(&conn);

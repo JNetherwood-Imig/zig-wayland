@@ -218,8 +218,8 @@ fn unsetenv(name: [:0]const u8) void {
         return;
     }
 
-    std.log.warn("Globally unsetting environment variables does not work without linking libc.", .{});
-    std.log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
-    std.log.warn("If there is any chance of spawning child wayland clients, " ++
+    log.warn("Globally unsetting environment variables does not work without linking libc.", .{});
+    log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
+    log.warn("If there is any chance of spawning child wayland clients, " ++
         "it is strongly reccommended to link with libc.", .{});
 }
