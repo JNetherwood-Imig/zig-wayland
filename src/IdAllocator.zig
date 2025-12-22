@@ -5,6 +5,11 @@ const IdAllocator = @This();
 pub const Bounded = @import("IdAllocator/Bounded.zig");
 pub const Unbounded = @import("IdAllocator/Unbounded.zig");
 
+pub const client_min_id: u32 = 0x00000001;
+pub const client_max_id: u32 = 0xfeffffff;
+pub const server_min_id: u32 = 0xff000000;
+pub const server_max_id: u32 = 0xfffffffe;
+
 /// Pointer to backing state.
 context: *anyopaque,
 vtable: VTable,
@@ -15,7 +20,7 @@ pub const VTable = struct {
 };
 
 pub const AllocError = error{
-    /// The id allocator has run out of new ids within its specified valid range.
+    /// The ID allocator has run out of new IDs within its specified valid range.
     OutOfIds,
     /// Another error occurred which is specific to the underlying implementation.
     /// Not used by any official implementations.
@@ -23,6 +28,10 @@ pub const AllocError = error{
 };
 
 pub const FreeError = error{
+    /// Attempting to free an ID that is outside of the valid range the allocator
+    /// was created to handle. For instance, passing a client ID to a server allocaotr,
+    /// or passing a server ID to a client allocator.
+    InvalidId,
     /// Free list has run out of memory
     OutOfMemory,
     /// Another error occurred which is specific to the underlying implementation.
@@ -32,7 +41,7 @@ pub const FreeError = error{
 
 /// Allocate an id using the underlying implementation.
 /// Returns a valid u32 id on success,
-/// `error.OutOfIds` when the underlying allocator has run out of new ids,
+/// `error.OutOfIds` when the underlying allocator has run out of new IDs,
 /// or `error.ImplementationSpecific` if it fails for any other reason.
 pub inline fn alloc(self: IdAllocator) AllocError!u32 {
     return self.vtable.alloc(self.context);
@@ -46,6 +55,7 @@ pub inline fn createObject(self: IdAllocator, comptime T: type) AllocError!T {
 
 /// Free `id` by returning it to the backing allocator.
 /// Can fail with `error.OutOfMemory` if the free list of the backing implementation is full,
+/// `error.InvalidId` when attempting to free an ID that is outside of its range,
 /// or `error.ImplementationSpecific` for any other reason.
 pub inline fn free(self: IdAllocator, id: u32) FreeError!void {
     try self.vtable.free(self.context, id);

@@ -311,7 +311,7 @@ fn emitSerialize(
     writer: *std.Io.Writer,
 ) !void {
     try writer.print(
-        "\t\tconst serialized_len = wire.serializeMessage(&message_buffer, self.getId(), {s}_message_opcode, ",
+        "\t\tconst serialized_len = try wire.serializeMessage(&message_buffer, self.getId(), {s}_message_opcode, ",
         .{self.name},
     );
     if (self.args.len > 0) {

@@ -2,10 +2,6 @@
 //! It is almost always the correct choice for large clients.
 
 const std = @import("std");
-const client_min_id: u32 = 0x00000001;
-const client_max_id: u32 = 0xfeffffff;
-const server_min_id: u32 = 0xff000000;
-const server_max_id: u32 = 0xfffffffe;
 const IdAllocator = @import("../IdAllocator.zig");
 
 const Unbounded = @This();
@@ -29,16 +25,16 @@ pub fn init(
 ) std.mem.Allocator.Error!Unbounded {
     return switch (protocol_side) {
         .client => .{
-            .next_id = client_min_id,
-            .min_id = client_min_id,
-            .max_id = client_max_id,
+            .next_id = IdAllocator.client_min_id,
+            .min_id = IdAllocator.client_min_id,
+            .max_id = IdAllocator.client_max_id,
             .free_list = try .initCapacity(gpa, options.free_list_initial_capacity),
             .gpa = gpa,
         },
         .server => .{
-            .next_id = server_min_id,
-            .min_id = server_min_id,
-            .max_id = server_max_id,
+            .next_id = IdAllocator.server_min_id,
+            .min_id = IdAllocator.server_min_id,
+            .max_id = IdAllocator.server_max_id,
             .free_list = try .initCapacity(gpa, options.free_list_initial_capacity),
             .gpa = gpa,
         },
@@ -72,7 +68,8 @@ fn alloc(context: *anyopaque) IdAllocator.AllocError!u32 {
 fn free(context: *anyopaque, id: u32) IdAllocator.FreeError!void {
     var self: *Unbounded = @ptrCast(@alignCast(context));
 
-    std.debug.assert(id >= self.min_id and id <= self.max_id);
+    if (id < self.min_id or id > self.max_id)
+        return error.InvalidId;
 
     if (id == self.next_id - 1)
         self.next_id = id

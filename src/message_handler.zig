@@ -105,7 +105,8 @@ pub fn MessageHandler(comptime Message: type) type {
 
         pub const GetMessageError = Connection.FlushError ||
             Connection.PollEventsError ||
-            error{TargetObjectNotFound};
+            DeserializeError ||
+            error{ TargetObjectNotFound, MessageTooLong };
 
         /// Try to get an message from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
@@ -140,6 +141,9 @@ pub fn MessageHandler(comptime Message: type) type {
                     continue :outer;
                 };
 
+                if (header.length > wire.libwayland_max_message_size)
+                    return error.MessageTooLong;
+
                 const message = conn.peekBytes(header.length) orelse {
                     conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
                         error.TimedOut => return null,
@@ -152,7 +156,7 @@ pub fn MessageHandler(comptime Message: type) type {
                 // When we find the appropriate proxy, use its interface to lookup the associated
                 // message types and deserialize the message
                 for (self.proxies.items) |proxy| if (proxy.id == header.object) {
-                    return deserializeMessage(Message, header, proxy.interface, body, conn) orelse
+                    return try deserializeMessage(Message, header, proxy.interface, body, conn) orelse
                         continue :outer;
                 };
                 log.err("Got message for untracked object {d} (opcode {d}).", .{
@@ -165,13 +169,15 @@ pub fn MessageHandler(comptime Message: type) type {
     };
 }
 
+const DeserializeError = wire.DeserializeError || error{ InvalidOpcode, InvalidInterface };
+
 fn deserializeMessage(
     comptime Message: type,
     header: wire.Header,
     target_interface: [:0]const u8,
     bytes: []const u8,
     conn: *Connection,
-) ?Message {
+) DeserializeError!?Message {
     // This is arbitrary, but works for now.
     @setEvalBranchQuota(10000);
 
@@ -195,7 +201,7 @@ fn deserializeMessage(
 
                 // Deserialize the message packet and create an *Message struct
                 // (e.g. wayland.Display.DeleteIdMessage)
-                var message: sub_field.type = wire.deserializeMessage(sub_field.type, bytes, fds);
+                var message = try wire.deserializeMessage(sub_field.type, bytes, fds);
 
                 // Since the target object is derived from the header,
                 // rather than the message signature, it is set after deserializing
@@ -207,13 +213,11 @@ fn deserializeMessage(
 
                 return @unionInit(Message, field.name, interface_message);
             },
-            else => @panic("Invalid opcode."),
+            else => return error.InvalidOpcode,
         }
     };
 
-    // One of the proxies was created with an interface
-    // that doesn't exist in the given set of protocols
-    unreachable;
+    return error.InvalidInterface;
 }
 
 fn countFds(comptime T: type) usize {
