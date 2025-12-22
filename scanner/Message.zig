@@ -318,17 +318,6 @@ fn emitSerialize(
         try writer.writeAll(".{\n");
         for (self.args) |arg| switch (arg.type) {
             .fd => {},
-            .string => try writer.print("\t\t\tcore.wire.String.init({s}_),\n", .{arg.name}),
-            .optional_string => try writer.print(
-                "\t\t\tcore.wire.String.initNullable({s}_),\n",
-                .{arg.name},
-            ),
-            .array => try writer.print("\t\t\tcore.wire.Array.init({s}_),\n", .{arg.name}),
-            .optional_object => try writer.print(
-                "\t\t\t@as(?u32, if ({s}_) |_inner| _inner.getId() else null),\n",
-                .{arg.name},
-            ),
-            .object => try writer.print("\t\t\t{s}_.getId(),\n", .{arg.name}),
             .any_new_id => try writer.writeAll("\t\t\tcore.wire.GenericNewId.init(T, version, new_id),\n"),
             else => try writer.print("\t\t\t{s}_,\n", .{arg.name}),
         };
@@ -340,8 +329,8 @@ fn calculateMaxLength(self: *const Message) usize {
     var length: usize = 8; // Start at size of message header
 
     for (self.args) |arg| switch (arg.type) {
-        // Strings and arrays have an undefined size,
-        // so we can only assume the maximum capacity, as asserted by libwayland
+        // Strings and arrays have an undefined size, so we can only assume the maximum capacity
+        // asserted by libwayland
         .array, .string, .optional_string, .any_new_id => return 4096,
         // Fds are not serialized on the wire, but sent via ancillary
         .fd => {},
