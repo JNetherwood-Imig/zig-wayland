@@ -43,12 +43,12 @@ pub const SocketInfo = union(enum) {
 
     pub const ConnectError = ConnectAutoError;
 
-    pub fn connect(self: *SocketInfo, ida: IdAllocator, buffers: *Connection.Buffers) !Connection {
+    pub fn connect(self: *SocketInfo, ida: IdAllocator) ConnectError!Connection {
         return switch (self.*) {
-            .auto => self.connectAuto(ida, buffers),
-            .sock => |sock| connectSock(sock, ida, buffers),
-            .name => |name| connectName(std.mem.sliceTo(&name, 0), ida, buffers),
-            .path => |path| connectPath(std.mem.sliceTo(&path, 0), ida, buffers),
+            .auto => self.connectAuto(ida),
+            .sock => |sock| connectSock(sock, ida),
+            .name => |name| connectName(std.mem.sliceTo(&name, 0), ida),
+            .path => |path| connectPath(std.mem.sliceTo(&path, 0), ida),
         };
     }
 
@@ -57,27 +57,26 @@ pub const SocketInfo = union(enum) {
     fn connectAuto(
         self: *SocketInfo,
         ida: IdAllocator,
-        buffers: *Connection.Buffers,
     ) ConnectAutoError!Connection {
         if (tryWaylandSocket()) |wayland_socket| {
             self.* = .{ .sock = wayland_socket };
             try validateFd(wayland_socket);
-            return connectSock(wayland_socket, ida, buffers);
+            return connectSock(wayland_socket, ida);
         }
 
         const display = posix.getenv("WAYLAND_DISPLAY") orelse "wayland-0";
         if (std.fs.path.isAbsolute(display)) {
             self.* = initPath(display) catch unreachable;
-            return connectPath(display, ida, buffers);
+            return connectPath(display, ida);
         } else {
             self.* = initName(display) catch unreachable;
-            return connectName(display, ida, buffers);
+            return connectName(display, ida);
         }
     }
 
     const ConnectNameError = ConnectPathError || error{NoXdgRuntimeDir};
 
-    fn connectName(name: []const u8, ida: IdAllocator, buffers: *Connection.Buffers) !Connection {
+    fn connectName(name: []const u8, ida: IdAllocator) !Connection {
         const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse
             return error.NoXdgRuntimeDir;
 
@@ -85,23 +84,19 @@ pub const SocketInfo = union(enum) {
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ xdg_runtime_dir, name }) catch
             return error.NameTooLong;
 
-        return connectPath(path, ida, buffers);
+        return connectPath(path, ida);
     }
 
     const ConnectPathError = posix.SocketError || posix.ConnectError || error{NameTooLong};
 
-    fn connectPath(
-        path: []const u8,
-        ida: IdAllocator,
-        buffers: *Connection.Buffers,
-    ) ConnectPathError!Connection {
+    fn connectPath(path: []const u8, ida: IdAllocator) ConnectPathError!Connection {
         const stream = try std.net.connectUnixSocket(path);
         const fd = stream.handle;
-        return connectSock(fd, ida, buffers);
+        return connectSock(fd, ida);
     }
 
-    fn connectSock(fd: posix.fd_t, ida: IdAllocator, buffers: *Connection.Buffers) Connection {
-        return .init(fd, ida, buffers);
+    fn connectSock(fd: posix.fd_t, ida: IdAllocator) Connection {
+        return Connection{ .handle = fd, .ida = ida };
     }
 
     fn tryWaylandSocket() ?posix.fd_t {

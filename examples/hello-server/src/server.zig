@@ -24,8 +24,7 @@ pub fn main() !void {
         var ida_state = wayland.IdAllocator.Bounded.init(&ida_buf, .client);
         const ida = ida_state.id_allocator();
 
-        var buffers = wayland.Connection.Buffers{};
-        var conn = try server.accept(ida, &buffers);
+        var conn = try server.accept(ida);
         defer conn.deinit();
 
         var proxy_buf: [32]RequestHandler.Proxy = undefined;

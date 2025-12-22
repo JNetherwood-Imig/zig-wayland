@@ -1,5 +1,22 @@
 const Type = @import("std").builtin.Type;
 
+/// Takes a tuple of generated protocols and returns a 2-level tagged union.
+/// The toplevel field corresponds to the interface, and the inner field
+/// contains each incoming message type for that interface.
+/// Calling `MessageUnion(.{ wayland, xdg_shell })` would produce the following output.
+///
+/// ```
+/// union(enum) {
+///     wl_display: union(enum) {
+///         delete_id: wayland.Display.DeleteIdMessage,
+///         @"error": wayland.Display.ErrorMessage,
+///     },
+///     ...
+///     xdg_wm_base: union(enum) {
+///         ping: xdg_shell.WmBase.PingMessage,
+///     },
+/// };
+/// ```
 pub fn MessageUnion(comptime protocols: anytype) type {
     var backing_enum = Type.Enum{
         .decls = &.{},

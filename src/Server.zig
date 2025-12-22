@@ -1,3 +1,5 @@
+//! Simple listener to accept Wayland client connections.
+
 const std = @import("std");
 const Connection = @import("Connection.zig");
 const IdAllocator = @import("IdAllocator.zig");
@@ -5,10 +7,14 @@ const posix = std.posix;
 
 const Server = @This();
 
-addr: ?std.net.Address,
+/// Socket file descriptor.
 handle: std.posix.fd_t,
+/// If the server created its own socket file, then it must be removed from the filesystem at
+/// shutdown by calling `unlink`, which requiers a path.
+addr: ?std.net.Address,
 
-/// Close the backing file descriptor.
+/// Close the socket file descriptor and remove the socket file from the filesystem unless it was
+/// manually created by the user.
 pub fn close(self: Server) void {
     if (self.addr) |addr| {
         posix.unlink(std.mem.sliceTo(&addr.un.path, 0)) catch {};
@@ -17,7 +23,7 @@ pub fn close(self: Server) void {
 }
 
 /// Wait for an incoming connection attempt.
-/// `timeout` is in milliseconds and passing -1 will wait indefinately.
+/// `timeout` is in milliseconds and timeout of -1 will wait indefinately.
 pub fn waitForConnection(self: Server, timeout: i32) !void {
     var pfd = [1]posix.pollfd{.{
         .events = posix.POLL.IN,
@@ -30,8 +36,12 @@ pub fn waitForConnection(self: Server, timeout: i32) !void {
 
 pub const AcceptError = posix.AcceptError;
 
-/// Accept an incoming client connection and return a `Connection` to handle messages.
-pub fn accept(self: Server, ida: IdAllocator, buffers: *Connection.Buffers) AcceptError!Connection {
+/// Accept an incoming client connection and return a `Connection` to exchange messages
+/// with the new client.
+pub fn accept(
+    self: Server,
+    ida: IdAllocator,
+) AcceptError!Connection {
     const conn_fd = try posix.accept(self.handle, null, null, 0);
-    return .init(conn_fd, ida, buffers);
+    return Connection{ .handle = conn_fd, .ida = ida };
 }

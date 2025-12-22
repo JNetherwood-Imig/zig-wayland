@@ -4,9 +4,22 @@ const Connection = @import("Connection.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.wayland);
 
-/// Construct a message handler to handle messages present in the `protocol` type.
-/// This makes it possible to generate code for custom protocols and pass the resulting type here
-/// to achieve full extensibility.
+/// Constructs a message handler for the result of `MessageUnion`.
+///
+/// Example:
+/// ```
+/// const Event = MessageUnion(.{ wayland, xdg_shell });
+/// const EventHandler = MessageHandler(Event);
+///
+/// pub fn main() !void {
+///     ...
+///     const handler = EventHandler.init(...);
+///     ...
+///     while (handler.waitNextMessage(...)) |event| switch (event) {
+///         wl_display => |display_event| switch (display_event) {...},
+///     } else |err| return err;
+/// }
+/// ```
 pub fn MessageHandler(comptime Message: type) type {
     return struct {
         const Self = @This();
@@ -103,9 +116,10 @@ pub fn MessageHandler(comptime Message: type) type {
             }
         }
 
-        pub const GetMessageError = Connection.FlushError ||
+        pub const GetMessageError = DeserializeError ||
+            Connection.FlushError ||
             Connection.PollEventsError ||
-            DeserializeError ||
+            Connection.ReadIncomingError ||
             error{ TargetObjectNotFound, MessageTooLong };
 
         /// Try to get an message from the `connection`,
@@ -135,20 +149,22 @@ pub fn MessageHandler(comptime Message: type) type {
                 // returning null if polling times out
                 const header = conn.peekHeader() orelse {
                     conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
-                        error.TimedOut => return null,
+                        error.Timeout => return null,
                         else => |e| return e,
                     };
+                    try conn.readIncoming();
                     continue :outer;
                 };
 
                 if (header.length > wire.libwayland_max_message_size)
                     return error.MessageTooLong;
 
-                const message = conn.peekBytes(header.length) orelse {
+                const message = conn.peek(header.length) orelse {
                     conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
-                        error.TimedOut => return null,
+                        error.Timeout => return null,
                         else => |e| return e,
                     };
+                    try conn.readIncoming();
                     continue :outer;
                 };
                 const body = message[@sizeOf(wire.Header)..];
@@ -196,7 +212,7 @@ fn deserializeMessage(
 
                 // At this point, all possible read failures have been passed,
                 // so we can finally discard consumed bytes.
-                conn.discardBytes(header.length);
+                conn.discard(header.length);
                 conn.discardFds(fd_count);
 
                 // Deserialize the message packet and create an *Message struct
@@ -223,7 +239,7 @@ fn deserializeMessage(
 fn countFds(comptime T: type) usize {
     var count: usize = 0;
     for (T._signature) |byte| {
-        if (byte == 'f') count += 1;
+        if (byte == 'd') count += 1;
     }
     return count;
 }

@@ -27,11 +27,8 @@ pub fn main() !void {
     var ida_state = wayland.IdAllocator.Bounded.init(&id_buf, .client);
     const ida = ida_state.id_allocator();
 
-    // Shortcut for creating stack buffers used by connection
-    var buffers = wayland.Connection.Buffers{};
-
     var sock_info: wayland.SocketInfo = .auto;
-    conn = sock_info.connect(ida, &buffers) catch |err| {
+    conn = sock_info.connect(ida) catch |err| {
         std.log.err("Failed to connect to {f}.", .{sock_info});
         return err;
     };

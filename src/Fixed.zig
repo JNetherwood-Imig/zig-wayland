@@ -1,4 +1,5 @@
-//! A 24.8 bit fixed-point number used in the Wayland wire format in place of floats.
+//! A 24.8 bit fixed-point number type used in the Wayland wire format in place of floats.
+
 const std = @import("std");
 
 const Fixed = @This();

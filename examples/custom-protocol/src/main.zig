@@ -15,12 +15,9 @@ pub fn main() !void {
     defer ida_state.deinit();
     const ida = ida_state.id_allocator();
 
-    // Setup backing buffers for connection
-    var buffers = wayland.Connection.Buffers{};
-
     // Connecto to server
     var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect(ida, &buffers);
+    var conn = try sock_info.connect(ida);
     defer conn.deinit();
 
     // Initialize event handler with default capacity of 64 objects to be tracked

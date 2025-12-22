@@ -10,9 +10,8 @@ pub fn main() !void {
     var ida_state: wayland.IdAllocator.Bounded = .init(&id_buf, .client);
     const ida = ida_state.id_allocator();
 
-    var buffers: wayland.Connection.Buffers = .{};
     var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect(ida, &buffers);
+    var conn = try sock_info.connect(ida);
     defer conn.deinit();
 
     var proxy_buf: [64]EventHandler.Proxy = undefined;

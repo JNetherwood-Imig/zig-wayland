@@ -1,10 +1,12 @@
-//! Components for interacting with the Wayland protocol.
+//! A simple API for interacting with the Wayland protocol.
+//! Includes both client and server components.
 
 pub const wire = @import("wire.zig");
-pub const Connection = @import("Connection.zig");
-pub const Server = @import("Server.zig");
 pub const Fixed = @import("Fixed.zig");
+pub const Server = @import("Server.zig");
+pub const Connection = @import("Connection.zig");
 pub const IdAllocator = @import("IdAllocator.zig");
+
 pub const SocketInfo = socket_info.SocketInfo;
 pub const MessageUnion = message_union.MessageUnion;
 pub const MessageHandler = message_handler.MessageHandler;

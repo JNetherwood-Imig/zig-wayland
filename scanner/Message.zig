@@ -181,27 +181,18 @@ fn emitNormal(
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
     try writer.writeAll("\t) !void {\n");
-    try writer.print(
-        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
-        .{self.name},
-    );
-    const serialize_fn_name = try util.snakeToPascal(gpa, self.name);
-    defer gpa.free(serialize_fn_name);
 
+    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
     try self.emitSerialize(writer);
 
+    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+
     if (fd_count > 0) {
-        try writer.writeAll(
-            "\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n",
-        );
-
-        for (self.args) |arg|
-            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-
+        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
-    } else {
-        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
+
     try writer.writeAll("\t}\n\n");
 }
 
@@ -234,27 +225,20 @@ fn emitConstructor(
     try writer.print("\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
     try writer.print("\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
-    try writer.print(
-        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
-        .{self.name},
-    );
+    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
 
     try self.emitSerialize(writer);
 
+    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+
     if (fd_count > 0) {
-        try writer.writeAll(
-            "\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n",
-        );
-
-        for (self.args) |arg|
-            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-
+        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
-    } else {
-        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
 
     try writer.print("\t\treturn @enumFromInt({s}_);\n", .{return_arg.name});
+
     try writer.writeAll("\t}\n\n");
 }
 
@@ -282,27 +266,20 @@ fn emitGenericConstructor(
         try arg.write(gpa, writer, map);
     try writer.writeAll("\t) !T {\n");
     try writer.writeAll("\t\tconst new_id = try connection.ida.alloc();\n");
-    try writer.print(
-        "\t\tvar message_buffer: [{s}_message_length]u8 = undefined;\n",
-        .{self.name},
-    );
+    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
 
     try self.emitSerialize(writer);
 
+    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+
     if (fd_count > 0) {
-        try writer.writeAll(
-            "\t\ttry connection.sendMessageWithFds(message_buffer[0..serialized_len], &.{\n",
-        );
-
-        for (self.args) |arg| {
-            if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-        }
-
+        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
-    } else {
-        try writer.writeAll("\t\ttry connection.sendMessage(message_buffer[0..serialized_len]);\n");
     }
+
     try writer.writeAll("\t\treturn @enumFromInt(new_id);\n");
+
     try writer.writeAll("\t}\n\n");
 }
 
@@ -310,15 +287,16 @@ fn emitSerialize(
     self: *const Message,
     writer: *std.Io.Writer,
 ) !void {
-    try writer.print(
-        "\t\tconst serialized_len = try wire.serializeMessage(&message_buffer, self.getId(), {s}_message_opcode, ",
-        .{self.name},
-    );
+    try writer.print("\t\tconst serialized_len = try wire.serializeMessage" ++
+        "(&message, self.getId(), {s}_message_opcode, ", .{self.name});
+
     if (self.args.len > 0) {
         try writer.writeAll(".{\n");
         for (self.args) |arg| switch (arg.type) {
             .fd => {},
-            .any_new_id => try writer.writeAll("\t\t\tcore.wire.GenericNewId.init(T, version, new_id),\n"),
+            .any_new_id => try writer.writeAll(
+                "\t\t\twire.GenericNewId.init(T, version, new_id),\n",
+            ),
             else => try writer.print("\t\t\t{s}_,\n", .{arg.name}),
         };
         try writer.writeAll("\t\t});\n");
@@ -342,7 +320,8 @@ fn calculateMaxLength(self: *const Message) usize {
 }
 
 fn fnName(self: *const Message, gpa: Allocator) ![]const u8 {
-    // Message name is a zig idenitfier, such as `error` or `type` and needs to be wrapped with @"..."
+    // Message name is a zig idenitfier such as `error` or `type`,
+    // and needs to be wrapped with @"..."
     if (isInvalidId(self.name))
         return self.fnNameInvalid(gpa);
 
