@@ -2,7 +2,7 @@
     .name = .wayland,
     .fingerprint = 0xa8d655e4cf50fda,
     .version = "0.0.1",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.15.0",
 
     .paths = .{
         "scanner",
