@@ -9,6 +9,10 @@ Use as a dependency of any zig 0.15+ project with
 zig fetch --save git+https://codeberg.org/jacksonni/zig-wayland
 ```
 
+## Documentation
+
+Official API documentation is hosted at [https://jacksonni.codeberg.page/zig-wayland](https://jacksonni.codeberg.page/zig-wayland).
+
 ## Examples
 
 For full example programs, refer to the examples directory.
