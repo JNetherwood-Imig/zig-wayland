@@ -1,4 +1,4 @@
-//! An interface similar to std.mem.Allocator for managing Wayland object ids.
+//! An interface similar to std.mem.Allocator for managing Wayland object IDs.
 
 const std = @import("std");
 const client_min_id: u32 = 0x00000001;
@@ -30,8 +30,8 @@ pub const FreeError = error{
     OutOfMemory,
 };
 
-/// Allocate an id using the underlying implementation.
-/// Returns a valid u32 id on success.
+/// Allocate an ID using the underlying implementation.
+/// Returns a valid u32 ID on success.
 /// Returns `error.OutOfIds` when the underlying allocator has run out of new IDs.
 pub inline fn alloc(self: IdAllocator) AllocError!u32 {
     return self.vtable.alloc(self.context);
@@ -51,15 +51,18 @@ pub inline fn free(self: IdAllocator, id: u32) FreeError!void {
     try self.vtable.free(self.context, id);
 }
 
+/// A simple ID allocator with a free list backed by a stack buffer.
+/// This can be ideal for small programs, or programs with a well-known maximum amount of IDs,
+/// but is otherwise not suitable.
 pub const Bounded = struct {
     next_id: u32,
     min_id: u32,
     max_id: u32,
     free_list: std.ArrayList(u32),
 
-    /// Initialize an allocator state backed by a buffer,
-    /// whose capacity will be the maximum number of free ids
-    /// that can be tracked at any given time.
+    /// Initialize an allocator state backed by a buffer, the capacity of which
+    /// will be the maximum number of free IDs that can be tracked at any given time.
+    /// Freeing any further IDs will result in `error.OutOfMemory`.
     pub fn init(buffer: []u32, protocol_side: ProtocolSide) Bounded {
         return switch (protocol_side) {
             .client => .{
@@ -81,10 +84,7 @@ pub const Bounded = struct {
     pub fn id_allocator(self: *Bounded) IdAllocator {
         return .{
             .context = self,
-            .vtable = .{
-                .alloc = _alloc,
-                .free = _free,
-            },
+            .vtable = .{ .alloc = _alloc, .free = _free },
         };
     }
 
@@ -109,6 +109,8 @@ pub const Bounded = struct {
     }
 };
 
+/// ID allocator which will never fail to free an ID, as the free list is backed by the heap.
+/// For programs that only need a small or well-known number of IDs, see `Bounded`.
 pub const Unbounded = struct {
     next_id: u32,
     min_id: u32,
@@ -116,8 +118,7 @@ pub const Unbounded = struct {
     free_list: std.ArrayList(u32),
     gpa: std.mem.Allocator,
 
-    /// Initialize the id allocator state with space for options.free_list_initial_capacity
-    /// elements in free-list (arbitrarily defaults to 64)
+    /// Initialize the id allocator state with space for `initial_capacity` in the free-list.
     pub fn init(
         gpa: std.mem.Allocator,
         protocol_side: ProtocolSide,
@@ -150,10 +151,7 @@ pub const Unbounded = struct {
     pub fn id_allocator(self: *Unbounded) IdAllocator {
         return .{
             .context = self,
-            .vtable = .{
-                .alloc = _alloc,
-                .free = _free,
-            },
+            .vtable = .{ .alloc = _alloc, .free = _free },
         };
     }
 

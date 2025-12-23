@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const Server = @import("Server.zig");
+const Connection = @import("Connection.zig");
+const IdAllocator = @import("IdAllocator.zig");
 const posix = std.posix;
 const log = std.log.scoped(.wayland);
-const Connection = @import("Connection.zig");
-const Server = @import("Server.zig");
-const IdAllocator = @import("IdAllocator.zig");
 
 /// Describes the various pieces of information that can be used to connect to a wayland server.
 /// This can also be used to debug failing connections, as it implements `format` and can provide
@@ -20,12 +20,15 @@ pub const SocketInfo = union(enum) {
     /// An absolute path to the socket.
     path: [108]u8,
 
-    /// Initialize a `ConnectInfo` by passing an already-connected file descriptor as `socket`.
+    /// Initialize with an already-connected file descriptor.
+    /// When the resulting `Connection` or `Server` is deinitialized,
+    /// `socket` will be closed, but if it exists in the filesystem, it will not be unlinked.
     pub fn initSocket(socket: posix.fd_t) SocketInfo {
         return .{ .sock = socket };
     }
 
-    /// Initialize a `ConnectInfo` using a specific socket endpoint name.
+    /// Initialize using a specific socket endpoint name.
+    /// The given `name` will be concatenated with `$XDG_RUNTIME_DIR` to make the socket path.
     pub fn initName(name: []const u8) !SocketInfo {
         if (name.len > 108) return error.NameTooLong;
         var self: SocketInfo = .{ .name = @splat(0) };
@@ -33,7 +36,7 @@ pub const SocketInfo = union(enum) {
         return self;
     }
 
-    /// Initialize a `ConnectInfo` using a specific absolute path.
+    /// Initialize using a specific absolute path.
     pub fn initPath(path: []const u8) !SocketInfo {
         if (path.len > 108) return error.pathTooLong;
         var self: SocketInfo = .{ .path = @splat(0) };
@@ -43,12 +46,26 @@ pub const SocketInfo = union(enum) {
 
     pub const ConnectError = ConnectAutoError;
 
+    /// Connect to the socket described in `self`.
+    /// If `self` is `.auto`, then use environment variables to detect the connection target,
+    /// and store the target in `self` for debugging if connecting fails.
     pub fn connect(self: *SocketInfo, ida: IdAllocator) ConnectError!Connection {
         return switch (self.*) {
             .auto => self.connectAuto(ida),
             .sock => |sock| connectSock(sock, ida),
             .name => |name| connectName(std.mem.sliceTo(&name, 0), ida),
             .path => |path| connectPath(std.mem.sliceTo(&path, 0), ida),
+        };
+    }
+
+    pub const ListenError = ListenAutoError;
+
+    pub fn listen(self: *SocketInfo) ListenError!Server {
+        return switch (self.*) {
+            .auto => self.listenAuto(),
+            .sock => |sock| listenSock(sock),
+            .name => |name| listenName(std.mem.sliceTo(&name, 0)),
+            .path => |path| listenPath(std.mem.sliceTo(&path, 0)),
         };
     }
 
@@ -115,6 +132,7 @@ pub const SocketInfo = union(enum) {
         NotASocket,
     };
 
+    /// Ensures that `fd` is a valid fd, and refers to a socket.
     fn validateFd(fd: posix.fd_t) ValidateFdError!void {
         const rc = std.os.linux.fcntl(fd, posix.F.GETFD, 0);
         switch (posix.errno(rc)) {
@@ -124,17 +142,6 @@ pub const SocketInfo = union(enum) {
 
         const stat = posix.fstat(fd) catch return error.StatFailed;
         if (!posix.S.ISSOCK(stat.mode)) return error.NotASocket;
-    }
-
-    pub const ListenError = ListenAutoError;
-
-    pub fn listen(self: *SocketInfo) ListenError!Server {
-        return switch (self.*) {
-            .auto => self.listenAuto(),
-            .sock => |sock| listenSock(sock),
-            .name => |name| listenName(std.mem.sliceTo(&name, 0)),
-            .path => |path| listenPath(std.mem.sliceTo(&path, 0)),
-        };
     }
 
     const ListenAutoError = ListenNameError ||
@@ -217,4 +224,8 @@ fn unsetenv(name: [:0]const u8) void {
     log.warn("Leaking WAYLAND_SOCKET can have consequences if spawning child processes.", .{});
     log.warn("If there is any chance of spawning child wayland clients, " ++
         "it is strongly reccommended to link with libc.", .{});
+}
+
+test {
+    std.testing.refAllDecls(SocketInfo);
 }

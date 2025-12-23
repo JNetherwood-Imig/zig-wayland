@@ -24,7 +24,7 @@ pub fn MessageHandler(comptime Message: type) type {
     return struct {
         const Self = @This();
 
-        /// List of currently tracked objects
+        /// List of currently tracked objects.
         proxies: std.ArrayList(Proxy),
 
         /// Tracks an object and its interface, used for decoding messages

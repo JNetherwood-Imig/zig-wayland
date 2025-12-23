@@ -41,8 +41,8 @@ pub fn main() !void {
     var handler = EventHandler.initBuffered(&proxy_buf);
 
     // Create display to bootstrap object creation
+    // and register it with the event handler to receive events.
     disp = try ida.createObject(wl.Display);
-    // Register display with event handler to receive events
     try handler.addObjectBounded(disp);
 
     // Create and register registry
@@ -54,7 +54,8 @@ pub fn main() !void {
     try handler.addObjectBounded(sync_cb);
 
     while (handler.waitNextMessage(&conn)) |event| switch (event) {
-        .wl_callback => |cb| { // Indicates that all globals have been received
+        .wl_callback => |cb| {
+            std.debug.assert(cb.done.wl_callback == sync_cb);
             const data = cb.done.callback_data;
             std.log.debug("Sync callback data: {d}.", .{data});
             break;
@@ -65,11 +66,10 @@ pub fn main() !void {
                 // Binding takes an enum for version which allows for
                 // at least some comptime sanity-checking and less magic numbers
                 if (std.mem.eql(u8, g.interface, wl.Compositor.interface)) {
-                    // We don't care about any compositor events here,
-                    // so there is no reason to add it to the event handler
+                    // The compositor interface has no events,
+                    // so we don't need to add it to the handler.
                     comp = try reg.bind(&conn, wl.Compositor, .v1, g.name);
                 } else if (std.mem.eql(u8, g.interface, wl.Shm.interface)) {
-                    // Shm events can also be discarded
                     shm = try reg.bind(&conn, wl.Shm, .v1, g.name);
                     try handler.addObjectBounded(shm);
                 } else if (std.mem.eql(u8, g.interface, xdg.WmBase.interface)) {
@@ -77,9 +77,9 @@ pub fn main() !void {
                     try handler.addObjectBounded(wm_base);
                 }
             },
-            else => {},
+            .global_remove => {},
         },
-        else => std.log.err("Unexpected event: {any}.", .{event}),
+        else => std.log.err("Unexpected event: {}.", .{event}),
     } else |e| return e;
 
     // Make sure we bound to all globals
@@ -140,20 +140,14 @@ fn createBuffer() !wl.Buffer {
         fd,
         0,
     );
-
-    // Neither the pool nor the buffer need to be registered with the event handler
-    // because we don't care about their events.
-    const pool = try shm.createPool(&conn, fd, size);
-    defer pool.destroy(&conn) catch {};
-    const buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
-
     @memset(shm_data, 255);
 
-    // IMPORTANT: the connection must be flushed before the fd is closed
-    // because the fd is not duplicated when being stored in the connection buffer,
-    // and must be sent before it is closed.
-    try conn.flush();
+    // Shm pools have no events, so we don't register it.
+    const pool = try shm.createPool(&conn, fd, size);
+    defer pool.destroy(&conn) catch {};
 
+    // We do need to register the buffer, but we'll do that when we return it.
+    const buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
     return buffer;
 }
 

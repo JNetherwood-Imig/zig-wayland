@@ -3,7 +3,6 @@
 const std = @import("std");
 const posix = std.posix;
 const testing = std.testing;
-
 const alignment: usize = @sizeOf(usize);
 
 pub const Header = extern struct {

@@ -7,7 +7,6 @@ const posix = std.posix;
 
 const Server = @This();
 
-/// Socket file descriptor.
 handle: std.posix.fd_t,
 /// If the server created its own socket file, then it must be removed from the filesystem at
 /// shutdown by calling `unlink`, which requiers a path.
@@ -16,9 +15,8 @@ addr: ?std.net.Address,
 /// Close the socket file descriptor and remove the socket file from the filesystem unless it was
 /// manually created by the user.
 pub fn close(self: Server) void {
-    if (self.addr) |addr| {
+    if (self.addr) |addr|
         posix.unlink(std.mem.sliceTo(&addr.un.path, 0)) catch {};
-    }
     posix.close(self.handle);
 }
 
@@ -38,10 +36,7 @@ pub const AcceptError = posix.AcceptError;
 
 /// Accept an incoming client connection and return a `Connection` to exchange messages
 /// with the new client.
-pub fn accept(
-    self: Server,
-    ida: IdAllocator,
-) AcceptError!Connection {
+pub fn accept(self: Server, ida: IdAllocator) AcceptError!Connection {
     const conn_fd = try posix.accept(self.handle, null, null, 0);
     return Connection{ .handle = conn_fd, .ida = ida };
 }

@@ -7,18 +7,17 @@ const cmsg = @import("cmsg.zig");
 const IdAllocator = @import("IdAllocator.zig");
 const posix = std.posix;
 const control_buf_len = cmsg.space(wire.libwayland_max_message_args);
+const default_head_bytes = std.mem.toBytes(cmsg.Header{ .len = cmsg.length(0) });
 
 const Connection = @This();
 
-/// Socket file descriptor.
 handle: posix.fd_t,
-/// ID allocator handle used in constructor messages.
 ida: IdAllocator,
 
 read_buf: [4096]u8 align(4) = @splat(0),
 write_buf: [4096]u8 align(4) = @splat(0),
 fd_read_buf: [20]posix.fd_t = @splat(-1),
-control_buf: [control_buf_len]u8 align(8) = @splat(0),
+control_buf: [control_buf_len]u8 align(8) = default_head_bytes ++ @as([80]u8, @splat(0)),
 
 reader_start: usize = 0,
 reader_end: usize = 0,
@@ -169,7 +168,7 @@ pub fn put(self: *Connection, bytes: []const u8) PutError!void {
     }
 }
 
-pub const PutFdsError = FlushError || error{TooManyFds};
+pub const PutFdsError = FlushError || error{ TooManyFds, ProcessFdQuotaExceeded, Unexpected };
 
 /// Write all of `fds` to the control buffer, incrementing the cmsg.Header data encoded at the
 /// start of the buffer to match. This function will flush the buffers if there is insufficient
@@ -180,15 +179,13 @@ pub fn putFds(self: *Connection, fds: []const posix.fd_t) PutFdsError!void {
     if (fds.len > wire.libwayland_max_message_args)
         return error.TooManyFds;
 
-    var count: usize = 0;
-    while (count < fds.len) {
+    for (0..fds.len) |i| {
         const control_len = self.controlHeader().len;
-        if (control_len == self.control_buf.len) try self.flush();
-        const len = @min(fds.len, (self.control_buf.len - control_len) / @sizeOf(posix.fd_t));
-        const dest = std.mem.bytesAsSlice(posix.fd_t, &self.control_buf);
-        @memcpy(dest[control_len / @sizeOf(posix.fd_t) ..][0..len], fds[count..][0..len]);
-        self.controlHeader().len += len * @sizeOf(posix.fd_t);
-        count += len;
+        if (self.control_buf.len - control_len < 4)
+            try self.flush();
+        const fd = try posix.dup(fds[i]);
+        std.mem.bytesAsValue(posix.fd_t, self.control_buf[control_len..][0..4]).* = fd;
+        self.controlHeader().len += 4;
     }
 }
 
@@ -236,8 +233,12 @@ fn controlHeader(self: *Connection) *cmsg.Header {
 }
 
 fn resetWriter(self: *Connection) void {
+    const head = self.controlHeader();
+    const fds = std.mem.bytesAsSlice(posix.fd_t, cmsg.dataConst(head));
+    for (fds) |fd| posix.close(fd);
+    head.* = .{ .len = cmsg.length(0) };
+
     self.writer_end = 0;
-    self.controlHeader().* = .{ .len = cmsg.length(0) };
 }
 
 // FIXME: This was taken from zig 0.16 std.posix since we don't have it yet,
