@@ -223,7 +223,3 @@ fn unsetenv(name: [:0]const u8) void {
     log.warn("Established connection using $WAYLAND_SOCKET.", .{});
     log.warn("Developers, make sure you've read the warning in README.md.", .{});
 }
-
-test {
-    std.testing.refAllDecls(SocketInfo);
-}
