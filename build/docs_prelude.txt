@@ -1,14 +1,9 @@
 Welcome to the `zig-wayland` documentation!
 
-This documentation is auto-generated for the core api, as well as all packaged protocols
-by the zig build system and hosted here on codeberg pages.
+The `wayland_core` module is a simple API for working with both the client and server sides of the
+Wayland protocol.
 
-The `wayland_core` module contains the core API, which is client-server agnostic, 
-and somewhat mirrors the zig 0.16+ std.Io.net Socket/Stream/Server API.
-
-`client_protocol` and `server_protocol` contain the generated documentation
-for their respective sides of the API for all packaged protocols, 
-which are [wayland](https://gitlab.freedesktop.org/wayland/wayland) (the core protocol),
-all `stable`, `staging`, and `unstable` members of
-[wayland-protocols](https://gitlab.freedekstop.org/wayland/wayland-protocols),
-as well as non-deprecated [wlr-protocols](https://gitlab.freedesktop.org/wlroots/wlr-protocols).
+The `client_protocol` and `server_protocol` modules were auto-generated from many xml files by the
+zig-wayland scanner, targeting their respective sides of the protocol. The documentation found
+here comes from the xml sources, and are betterpresented on [wayland.app](https://wayland.app).
+This documentation should serve as a mapping between the Wayland spec and zig API.
