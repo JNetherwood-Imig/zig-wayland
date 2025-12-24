@@ -1,5 +1,5 @@
-//! Last updated to wayland-protocols version 1.45
-//! 18 December 2025
+//! Last updated to wayland-protocols version 1.47
+//! 23 December 2025
 
 pub const alpha_modifier_v1 = .{
     .subpath = "staging/alpha-modifier/alpha-modifier-v1.xml",
