@@ -4,14 +4,22 @@ A pure zig implementation of the Wayland protocol for creating both client and s
 
 ## Installation
 
-Use as a dependency of any zig 0.15+ project with
+Can be used as a dependency of any zig 0.15 project.
+
+To use latest release, run
+```sh
+zig fetch --save https://codeberg.org/jacksonni/zig-wayland/releases/download/v1.0.0/zig-wayland.tar.xz
+```
+
+Or to use master branch, run
 ```sh
 zig fetch --save git+https://codeberg.org/jacksonni/zig-wayland
 ```
 
 ## Documentation
 
-Official API documentation is hosted at [https://jacksonni.codeberg.page/zig-wayland](https://jacksonni.codeberg.page/zig-wayland).
+Official API documentation is hosted at
+[jacksonni.codeberg.page/zig-wayland](https://jacksonni.codeberg.page/zig-wayland).
 
 ## Examples
 

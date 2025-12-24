@@ -1,16 +1,10 @@
 .{
     .name = .wayland,
     .fingerprint = 0xa8d655e4cf50fda,
-    .version = "0.0.1",
+    .version = "1.0.0",
     .minimum_zig_version = "0.15.0",
 
-    .paths = .{
-        "scanner",
-        "src",
-        "examples",
-        "build.zig",
-        "build.zig.zon",
-    },
+    .paths = .{""},
 
     .dependencies = .{
         .xml = .{
