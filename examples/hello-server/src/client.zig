@@ -17,7 +17,7 @@ pub fn main() !void {
     var proxy_buf: [64]EventHandler.Proxy = undefined;
     var handler = EventHandler.initBuffered(&proxy_buf);
 
-    const disp = try ida.createObject(wl.Display);
+    const disp: wl.Display = .display;
     try handler.addObjectBounded(disp);
 
     const reg = try disp.getRegistry(&conn);

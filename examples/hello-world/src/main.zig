@@ -13,7 +13,7 @@ const height = 256;
 // State variables
 var configured: bool = false;
 var conn: wayland.Connection = undefined;
-var disp: wl.Display = .invalid;
+const disp: wl.Display = .display; // wl_display has always has the special reserved id of 1.
 var reg: wl.Registry = .invalid;
 var comp: wl.Compositor = .invalid;
 var shm: wl.Shm = .invalid;
@@ -43,9 +43,7 @@ pub fn main() !void {
     var proxy_buf: [16]EventHandler.Proxy = undefined;
     var handler = EventHandler.initBuffered(&proxy_buf);
 
-    // Create display to bootstrap object creation
-    // and register it with the event handler to receive events.
-    disp = try ida.createObject(wl.Display);
+    // Register display with event handler.
     try handler.addObjectBounded(disp);
 
     // Create and register registry

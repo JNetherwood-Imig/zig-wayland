@@ -11,7 +11,7 @@ pub fn main() !void {
     const gpa = gpa_state.allocator();
 
     // Setup ID allocator
-    var ida_state = try wayland.IdAllocator.Unbounded.init(gpa, .client, .{});
+    var ida_state = try wayland.IdAllocator.Unbounded.init(gpa, .client, 8);
     defer ida_state.deinit();
     const ida = ida_state.id_allocator();
 
@@ -20,11 +20,11 @@ pub fn main() !void {
     var conn = try sock_info.connect(ida);
     defer conn.deinit();
 
-    // Initialize event handler with default capacity of 64 objects to be tracked
-    var handler = try EventHandler.initCapacity(gpa, 64);
+    // Initialize event handler
+    var handler = try EventHandler.initCapacity(gpa, 8);
     defer handler.deinit(gpa);
 
-    const disp = try ida.createObject(wl.Display);
+    const disp: wl.Display = .display;
     try handler.addObject(gpa, disp);
 
     const reg = try disp.getRegistry(&conn);

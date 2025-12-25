@@ -21,7 +21,7 @@ pub fn main() !void {
         log.info("Got connection!", .{});
 
         var ida_buf: [32]u32 = undefined;
-        var ida_state = wayland.IdAllocator.Bounded.init(&ida_buf, .client);
+        var ida_state = wayland.IdAllocator.Bounded.init(&ida_buf, .server);
         const ida = ida_state.id_allocator();
 
         var conn = try server.accept(ida);
@@ -30,7 +30,7 @@ pub fn main() !void {
         var proxy_buf: [32]RequestHandler.Proxy = undefined;
         var handler = RequestHandler.initBuffered(&proxy_buf);
 
-        const disp = try ida.createObject(wl.Display);
+        const disp: wl.Display = .display;
         try handler.addObjectBounded(disp);
 
         while (handler.waitNextMessage(&conn)) |req| switch (req) {

@@ -1,7 +1,7 @@
 //! An interface similar to std.mem.Allocator for managing Wayland object IDs.
 
 const std = @import("std");
-const client_min_id: u32 = 0x00000001;
+const client_min_id: u32 = 0x00000002;
 const client_max_id: u32 = 0xfeffffff;
 const server_min_id: u32 = 0xff000000;
 const server_max_id: u32 = 0xfffffffe;
@@ -80,7 +80,7 @@ pub const Bounded = struct {
         };
     }
 
-    /// Get an IdAllocator interface for the FixedBufferAllocator
+    /// Get an IdAllocator interface
     pub fn id_allocator(self: *Bounded) IdAllocator {
         return .{
             .context = self,
@@ -147,7 +147,7 @@ pub const Unbounded = struct {
         self.free_list.deinit(self.gpa);
     }
 
-    /// Get an IdAllocator interface for the DynamicIdAllocator
+    /// Get an IdAllocator interface
     pub fn id_allocator(self: *Unbounded) IdAllocator {
         return .{
             .context = self,
