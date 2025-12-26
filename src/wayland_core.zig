@@ -13,6 +13,10 @@ pub const SocketInfo = socket_info.SocketInfo;
 pub const MessageUnion = message_union.MessageUnion;
 pub const MessageHandler = message_handler.MessageHandler;
 
+pub const MessageSendError = IdAllocator.AllocError ||
+    Connection.PutError ||
+    Connection.PutFdsError;
+
 const socket_info = @import("socket_info.zig");
 const message_union = @import("message_union.zig");
 const message_handler = @import("message_handler.zig");

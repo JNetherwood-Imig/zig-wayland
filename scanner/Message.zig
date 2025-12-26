@@ -180,7 +180,7 @@ fn emitNormal(
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) !void {\n");
+    try writer.writeAll("\t) core.MessageSendError!void {\n");
 
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
     try self.emitSerialize(writer);
@@ -222,7 +222,7 @@ fn emitConstructor(
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
-    try writer.print("\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
+    try writer.print("\t) core.MessageSendError!{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
     try writer.print("\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
@@ -264,7 +264,7 @@ fn emitGenericConstructor(
     try writer.writeAll("\t\tversion: T.Version,\n");
     for (self.args) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) !T {\n");
+    try writer.writeAll("\t) core.MessageSendError!T {\n");
     try writer.writeAll("\t\tconst new_id = try connection.ida.alloc();\n");
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
 
