@@ -1,7 +1,7 @@
 .{
     .name = .wayland,
     .fingerprint = 0xa8d655e4cf50fda,
-    .version = "1.0.0",
+    .version = "1.0.2",
     .minimum_zig_version = "0.15.0",
 
     .paths = .{""},
