@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const Fixed = @import("Fixed.zig");
+const Fixed = @import("fixed.zig").Fixed;
 
 pub const libwayland_max_message_size = 4096;
 pub const libwayland_max_message_args = 20;
@@ -178,7 +178,7 @@ test "serialize optional object" {
 
 /// Writes the backing i32 of `fixed` to the beginning of `buffer` and returns `@sizeOf(i32)`.
 fn serializeFixed(buffer: []u8, fixed: Fixed) usize {
-    return serializeInt(buffer, fixed.data);
+    return serializeInt(buffer, @bitCast(fixed));
 }
 
 test "serialize fixed" {
@@ -352,12 +352,12 @@ test "deserialize uint" {
 fn deserializeFixed(data: []const u8) DeserializeError!struct { Fixed, usize } {
     if (data.len < 4) return error.InvalidData;
     const raw, _ = try deserializeInt(data);
-    return .{ .{ .data = raw }, 4 };
+    return .{ @bitCast(raw), 4 };
 }
 
 test "deserialize fixed" {
     const fixed: Fixed = .from(1.23);
-    const res, const len = try deserializeFixed(std.mem.asBytes(&fixed.data));
+    const res, const len = try deserializeFixed(std.mem.asBytes(&fixed));
     try std.testing.expectApproxEqAbs(1.23, res.to(f64), 0.01);
     try std.testing.expectEqual(len, 4);
     try std.testing.expectError(error.InvalidData, deserializeFixed(&.{ 0, 1, 2 }));

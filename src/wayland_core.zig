@@ -5,7 +5,7 @@
 //! Copyright © 2025 Jackson Netherwood-Imig.
 
 pub const wire = @import("wire.zig");
-pub const Fixed = @import("Fixed.zig");
+pub const Fixed = @import("fixed.zig").Fixed;
 pub const Server = @import("Server.zig");
 pub const Connection = @import("Connection.zig");
 pub const IdAllocator = @import("IdAllocator.zig");
