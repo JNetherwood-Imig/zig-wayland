@@ -1,6 +1,6 @@
 Welcome to the `zig-wayland` documentation.
 
-This documentation refers to release 1.0.0.
+This documentation refers to release v1.0.3.
 
 The `wayland_core` module is a simple API for working with both the client and server sides of the
 Wayland protocol.

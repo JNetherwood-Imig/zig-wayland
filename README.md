@@ -8,7 +8,7 @@ Can be used as a dependency of any zig 0.15 project.
 
 To use latest release, run
 ```sh
-zig fetch --save https://codeberg.org/jacksonni/zig-wayland/archive/v1.0.2.tar.gz
+zig fetch --save https://codeberg.org/jacksonni/zig-wayland/archive/v1.0.3.tar.gz
 ```
 
 Or to use master branch, run
