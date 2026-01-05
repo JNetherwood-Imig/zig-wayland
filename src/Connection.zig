@@ -132,18 +132,22 @@ pub fn readIncoming(self: *Connection) ReadIncomingError!void {
 
 fn resetReader(self: *Connection) void {
     const len = self.reader_end - self.reader_start;
-    if (self.reader_start > len)
-        @memcpy(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len])
-    else
-        @memmove(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len]);
+    if (len > 0) {
+        if (self.reader_start > len)
+            @memcpy(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len])
+        else
+            @memmove(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len]);
+    }
     self.reader_start = 0;
     self.reader_end = len;
 
     const fd_len = self.reader_fd_end - self.reader_fd_start;
-    if (self.reader_fd_start > fd_len)
-        @memcpy(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len])
-    else
-        @memmove(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len]);
+    if (fd_len > 0) {
+        if (self.reader_fd_start > fd_len)
+            @memcpy(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len])
+        else
+            @memmove(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len]);
+    }
     self.reader_fd_start = 0;
     self.reader_fd_end = fd_len;
 }
