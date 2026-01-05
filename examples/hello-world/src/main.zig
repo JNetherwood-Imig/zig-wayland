@@ -13,12 +13,14 @@ const height = 256;
 // State variables
 var configured: bool = false;
 var conn: wayland.Connection = undefined;
+var handler: EventHandler = undefined;
 const disp: wl.Display = .display; // wl_display has always has the special reserved id of 1.
 var reg: wl.Registry = .invalid;
 var comp: wl.Compositor = .invalid;
 var shm: wl.Shm = .invalid;
 var wm_base: xdg.WmBase = .invalid;
 var surf: wl.Surface = .invalid;
+var buffer: wl.Buffer = .invalid;
 var shm_data: []align(4096) u8 = &.{};
 
 pub fn main() !void {
@@ -40,8 +42,8 @@ pub fn main() !void {
     std.log.info("Connected to {f}.", .{sock_info});
 
     // Create event handler backed by stack buffer
-    var proxy_buf: [16]EventHandler.Proxy = undefined;
-    var handler = EventHandler.initBuffered(&proxy_buf);
+    var client_interface_buf: [16]?[:0]const u8 = undefined;
+    handler = EventHandler.initBuffered(&client_interface_buf, &.{});
 
     // Register display with event handler.
     try handler.addObjectBounded(disp);
@@ -67,6 +69,7 @@ pub fn main() !void {
                     // The compositor interface has no events,
                     // so we don't need to add it to the handler.
                     comp = try reg.bind(&conn, wl.Compositor, .v1, g.name);
+                    try handler.addObjectBounded(comp);
                 } else if (std.mem.eql(u8, g.interface, wl.Shm.interface)) {
                     shm = try reg.bind(&conn, wl.Shm, .v1, g.name);
                     try handler.addObjectBounded(shm);
@@ -103,8 +106,7 @@ pub fn main() !void {
             try xdg_surf.ackConfigure(&conn, ev.configure.serial);
             if (!configured) {
                 // Create and register the buffer.
-                const buffer = try createBuffer();
-                try handler.addObjectBounded(buffer);
+                try createBuffer();
                 // Attach buffer to our surface so it can be presented.
                 try surf.attach(&conn, buffer, 0, 0);
             }
@@ -121,7 +123,7 @@ pub fn main() !void {
             // **must** handle the event by returning the id to the allocator and removing the
             // object from the event handler.
             .delete_id => |id| {
-                handler.delObject(id.id);
+                try handler.delObject(id.id);
                 try ida.free(id.id);
             },
             // Much more advanced handling of the error event could easily be done,
@@ -137,7 +139,7 @@ pub fn main() !void {
 }
 
 // Create a wl_buffer backed by shm.
-fn createBuffer() !wl.Buffer {
+fn createBuffer() !void {
     const stride = width * 4;
     const size = stride * height;
 
@@ -156,13 +158,12 @@ fn createBuffer() !wl.Buffer {
     // Fill buffer with white pixels.
     @memset(shm_data, 255);
 
-    // Shm pools have no events, so we don't register it.
     const pool = try shm.createPool(&conn, fd, size);
     defer pool.destroy(&conn) catch {};
+    try handler.addObjectBounded(pool);
 
-    // We do need to register the buffer, but we'll do that in the parent scope once we return it.
-    const buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
-    return buffer;
+    buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
+    try handler.addObjectBounded(buffer);
 }
 
 // The following utility functions are quick and dirty replacements for the ones

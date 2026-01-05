@@ -27,8 +27,8 @@ pub fn main() !void {
         var conn = try server.accept(ida);
         defer conn.deinit();
 
-        var proxy_buf: [32]RequestHandler.Proxy = undefined;
-        var handler = RequestHandler.initBuffered(&proxy_buf);
+        var client_interface_buf: [32]?[:0]const u8 = @splat(null);
+        var handler = RequestHandler.initBuffered(&client_interface_buf, &.{});
 
         const disp: wl.Display = .display;
         try handler.addObjectBounded(disp);

@@ -14,8 +14,8 @@ pub fn main() !void {
     var conn = try sock_info.connect(ida);
     defer conn.deinit();
 
-    var proxy_buf: [64]EventHandler.Proxy = undefined;
-    var handler = EventHandler.initBuffered(&proxy_buf);
+    var client_interface_buf: [64]?[:0]const u8 = @splat(null);
+    var handler = EventHandler.initBuffered(&client_interface_buf, &.{});
 
     const disp: wl.Display = .display;
     try handler.addObjectBounded(disp);
@@ -35,7 +35,7 @@ pub fn main() !void {
         .wl_display => |ev| switch (ev) {
             .delete_id => |id| {
                 try ida.free(id.id);
-                handler.delObject(id.id);
+                try handler.delObject(id.id);
             },
             .@"error" => return error.ProtocolError,
         },
