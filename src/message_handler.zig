@@ -140,6 +140,12 @@ pub fn MessageHandler(comptime Message: type) type {
         /// Remove an object from the handler.
         /// `object` can be either a wayland object from a factory interface
         /// or `IdAllocator` or a raw integer id.
+        ///
+        /// This function attempts to unregister the object by setting the interface at the index
+        /// corresponding to the object id to `null`, and fails with `error.InvalidObject`
+        /// when attempting to free an object that was never added.
+        ///
+        /// This error can safely be ignored if opting to not add objects without incoming messages.
         pub fn delObject(self: *Self, object: anytype) DelObjectError!void {
             const id = switch (@typeInfo(@TypeOf(object))) {
                 .int => object,
