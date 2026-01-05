@@ -1,11 +1,12 @@
 //! An interface similar to std.mem.Allocator for managing Wayland object IDs.
 
 const std = @import("std");
-const client_min_id: u32 = 0x00000002;
-const client_max_id: u32 = 0xfeffffff;
-const server_min_id: u32 = 0xff000000;
-const server_max_id: u32 = 0xfffffffe;
-const ProtocolSide = enum { client, server };
+const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
+
+pub const client_min_id: u32 = 0x00000002;
+pub const client_max_id: u32 = 0xfeffffff;
+pub const server_min_id: u32 = 0xff000000;
+pub const server_max_id: u32 = 0xfffffffe;
 
 const IdAllocator = @This();
 

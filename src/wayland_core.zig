@@ -12,6 +12,7 @@ pub const IdAllocator = @import("IdAllocator.zig");
 pub const SocketInfo = socket_info.SocketInfo;
 pub const MessageUnion = message_union.MessageUnion;
 pub const MessageHandler = message_handler.MessageHandler;
+pub const ProtocolSide = enum { client, server };
 
 pub const MessageSendError = IdAllocator.AllocError ||
     Connection.PutError ||

@@ -1,6 +1,8 @@
 const std = @import("std");
 const wire = @import("wire.zig");
 const Connection = @import("Connection.zig");
+const IdAllocator = @import("IdAllocator.zig");
+const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.wayland);
 
@@ -24,33 +26,44 @@ pub fn MessageHandler(comptime Message: type) type {
     return struct {
         const Self = @This();
 
-        /// List of currently tracked objects.
-        proxies: std.ArrayList(Proxy),
-
-        /// Tracks an object and its interface, used for decoding messages
-        pub const Proxy = struct {
-            id: u32,
-            interface: [:0]const u8,
-        };
+        client_interfaces: []?[:0]const u8,
+        server_interfaces: []?[:0]const u8,
 
         /// Initialize an unbounded message handler with an allocator and ititial capacity
         pub fn initCapacity(gpa: Allocator, initial_capacity: usize) Allocator.Error!Self {
-            return .{ .proxies = try .initCapacity(gpa, initial_capacity) };
+            const client_interfaces = try gpa.alloc(?[:0]const u8, initial_capacity);
+            for (client_interfaces) |*item| item.* = null;
+            errdefer gpa.free(client_interfaces);
+
+            const server_interfaces = try gpa.alloc(?[:0]const u8, initial_capacity);
+            for (server_interfaces) |*item| item.* = null;
+
+            return Self{
+                .client_interfaces = client_interfaces,
+                .server_interfaces = server_interfaces,
+            };
         }
 
         /// Initialize a bounded message handler which does not invoke the heap.
         /// When initializing this way, always use addObjectBounded instead of addObject
         /// because an allocator cannot be used.
-        pub fn initBuffered(buffer: []Proxy) Self {
-            return .{ .proxies = .initBuffer(buffer) };
+        pub fn initBuffered(client_buffer: []?[:0]const u8, server_buffer: []?[:0]const u8) Self {
+            for (client_buffer) |*item| item.* = null;
+            for (server_buffer) |*item| item.* = null;
+
+            return .{
+                .client_interfaces = client_buffer,
+                .server_interfaces = server_buffer,
+            };
         }
 
-        /// Free the underlying list of proxies if initialized using `initCapacity`
+        /// Only to be used with `initCapacity`.
         pub fn deinit(self: *Self, gpa: Allocator) void {
-            self.proxies.deinit(gpa);
+            gpa.free(self.client_interfaces);
+            gpa.free(self.server_interfaces);
         }
 
-        pub const AddObjectError = error{OutOfMemory};
+        pub const AddObjectError = error{ InvalidObject, ObjectAlreadyExists, OutOfMemory };
 
         /// Add an object to an unbounded message handler.
         /// NOTE: Must have been initialized with `initCapacity`,
@@ -58,11 +71,13 @@ pub fn MessageHandler(comptime Message: type) type {
         /// `object` must be a wayland object created either by a factory interface
         /// or by an `IdAllocator`
         pub fn addObject(self: *Self, gpa: Allocator, object: anytype) AddObjectError!void {
-            const proxy = Proxy{
-                .id = object.getId(),
-                .interface = @TypeOf(object).interface,
-            };
-            try self.proxies.append(gpa, proxy);
+            const id = object.getId();
+            const interface = @TypeOf(object).interface;
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+
+            try self.ensureCapacity(gpa, idx, side);
+            try self.add(idx, interface, side);
         }
 
         /// Add an object to the message handler, failing if capacity is reached.
@@ -71,11 +86,20 @@ pub fn MessageHandler(comptime Message: type) type {
         /// `object` must be a wayland object created either by a factory interface
         /// or by an `IdAllocator`
         pub fn addObjectBounded(self: *Self, object: anytype) AddObjectError!void {
-            const proxy = Proxy{
-                .id = object.getId(),
-                .interface = @TypeOf(object).interface,
+            const id = object.getId();
+            const interface = @TypeOf(object).interface;
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+            const interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
             };
-            try self.proxies.appendBounded(proxy);
+
+            if (idx >= interfaces.len) {
+                @branchHint(.unlikely);
+                return error.OutOfMemory;
+            }
+            try self.add(idx, interface, side);
         }
 
         /// Add a raw id and associated interface to the message handler.
@@ -87,7 +111,10 @@ pub fn MessageHandler(comptime Message: type) type {
             id: u32,
             interface: [:0]const u8,
         ) AddObjectError!void {
-            try self.proxies.append(gpa, .{ .id = id, .interface = interface });
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+            try self.ensureCapacity(gpa, idx, side);
+            try self.add(id, interface, side);
         }
 
         /// Add a raw id and associated interface to the message handler,
@@ -95,32 +122,50 @@ pub fn MessageHandler(comptime Message: type) type {
         /// This function is meant to be used with `initBuffered`,
         /// but is completely valid to use with `initCapacity`
         pub fn addRawBounded(self: *Self, id: u32, interface: [:0]const u8) AddObjectError!void {
-            try self.proxies.appendBounded(.{ .id = id, .interface = interface });
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+            const interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
+            };
+            if (idx >= interfaces.len) {
+                @branchHint(.unlikely);
+                return error.OutOfMemory;
+            }
+            try self.add(idx, interface, side);
         }
+
+        pub const DelObjectError = error{InvalidObject};
 
         /// Remove an object from the handler.
         /// `object` can be either a wayland object from a factory interface
         /// or `IdAllocator` or a raw integer id.
-        pub fn delObject(self: *Self, object: anytype) void {
+        pub fn delObject(self: *Self, object: anytype) DelObjectError!void {
             const id = switch (@typeInfo(@TypeOf(object))) {
                 .int => object,
                 .@"enum" => object.getId(),
                 else => @compileError("Unsupported type."),
             };
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+            var interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
+            };
 
-            for (self.proxies.items, 0..) |proxy, i| {
-                if (proxy.id == id) {
-                    _ = self.proxies.swapRemove(i);
-                    return;
-                }
+            if (idx >= interfaces.len or interfaces[idx] == null) {
+                @branchHint(.unlikely);
+                log.err("Invalid object {d}.", .{id});
+                return error.InvalidObject;
             }
+            interfaces[idx] = null;
         }
 
         pub const GetMessageError = DeserializeError ||
             Connection.FlushError ||
             Connection.PollEventsError ||
             Connection.ReadIncomingError ||
-            error{ TargetObjectNotFound, MessageTooLong };
+            error{ InvalidObject, MessageTooLong };
 
         /// Try to get an message from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
@@ -169,23 +214,88 @@ pub fn MessageHandler(comptime Message: type) type {
                 };
                 const body = message[@sizeOf(wire.Header)..];
 
-                // When we find the appropriate proxy, use its interface to lookup the associated
-                // message types and deserialize the message
-                for (self.proxies.items) |proxy| if (proxy.id == header.object) {
-                    return try deserializeMessage(Message, header, proxy.interface, body, conn) orelse
-                        continue :outer;
-                };
-                log.err("Got message for untracked object {d} (opcode {d}).", .{
-                    header.object,
-                    header.opcode,
-                });
-                return error.TargetObjectNotFound;
+                const interface = try self.getInterface(header.object);
+                return try deserializeMessage(Message, header, interface, body, conn) orelse
+                    continue :outer;
             }
+        }
+
+        fn ensureCapacity(
+            self: *Self,
+            gpa: Allocator,
+            idx: usize,
+            side: ProtocolSide,
+        ) error{ InvalidObject, OutOfMemory }!void {
+            var interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
+            };
+
+            if (idx > interfaces.len) return error.InvalidObject;
+
+            if (idx == interfaces.len) {
+                const new_capacity = interfaces.len * 2;
+                const new_memory = gpa.remap(interfaces, new_capacity) orelse mem: {
+                    const new_memory = try gpa.alloc(?[:0]const u8, new_capacity);
+                    @memcpy(new_memory[0..interfaces.len], interfaces);
+                    gpa.free(interfaces);
+                    break :mem new_memory;
+                };
+
+                interfaces.ptr = new_memory.ptr;
+                const old_len = interfaces.len;
+                interfaces.len = new_memory.len;
+                for (old_len..interfaces.len) |i|
+                    interfaces[i] = null;
+            }
+        }
+
+        fn add(
+            self: *Self,
+            idx: usize,
+            interface: [:0]const u8,
+            side: ProtocolSide,
+        ) error{ObjectAlreadyExists}!void {
+            const interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
+            };
+
+            if (interfaces[idx] != null) {
+                @branchHint(.unlikely);
+                return error.ObjectAlreadyExists;
+            }
+            interfaces[idx] = interface;
+        }
+
+        fn getSide(id: u32) error{InvalidObject}!ProtocolSide {
+            return switch (id) {
+                1, IdAllocator.client_min_id...IdAllocator.client_max_id => ProtocolSide.client,
+                IdAllocator.server_min_id...IdAllocator.server_max_id => ProtocolSide.server,
+                else => error.InvalidObject,
+            };
+        }
+
+        fn getIdx(id: u32, side: ProtocolSide) usize {
+            return switch (side) {
+                .client => id - 1,
+                .server => id - IdAllocator.server_min_id,
+            };
+        }
+
+        pub fn getInterface(self: *Self, id: u32) error{InvalidObject}![:0]const u8 {
+            const side = try getSide(id);
+            const idx = getIdx(id, side);
+            const interfaces = switch (side) {
+                .client => self.client_interfaces,
+                .server => self.server_interfaces,
+            };
+            return interfaces[idx] orelse error.InvalidObject;
         }
     };
 }
 
-const DeserializeError = wire.DeserializeError || error{ InvalidOpcode, InvalidInterface };
+const DeserializeError = wire.DeserializeError || error{InvalidOpcode};
 
 fn deserializeMessage(
     comptime Message: type,
@@ -233,7 +343,7 @@ fn deserializeMessage(
         }
     };
 
-    return error.InvalidInterface;
+    @panic("Interface not present in generated message union.");
 }
 
 fn countFds(comptime T: type) usize {
