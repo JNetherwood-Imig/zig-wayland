@@ -161,7 +161,7 @@ pub fn MessageHandler(comptime Message: type) type {
 
             if (idx >= interfaces.len or interfaces[idx] == null) {
                 @branchHint(.unlikely);
-                log.err("Invalid object {d}.", .{id});
+                log.err("Delete object: invalid object id: {d}.", .{id});
                 return error.InvalidObject;
             }
             interfaces[idx] = null;
