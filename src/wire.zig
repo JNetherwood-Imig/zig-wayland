@@ -66,6 +66,7 @@ pub fn serializeMessage(buf: []u8, object: u32, opcode: u16, args: anytype) Seri
         if (index >= buf.len) return error.MessageTooLong;
         index += serializeArg(buf[index..], @field(args, f.name));
     }
+    std.debug.assert(index == length);
 
     return length;
 }
@@ -279,7 +280,7 @@ fn calculateArgsLength(args: anytype) u16 {
             []const u8 => @intCast(roundup4(f.len) + 4),
             [:0]const u8 => @intCast(roundup4(f.len + 1) + 4),
             ?[:0]const u8 => if (f) |s| @intCast(roundup4(s.len + 1) + 4) else 4,
-            GenericNewId => @intCast(roundup4(f.interface.len) + 12),
+            GenericNewId => @intCast(roundup4(f.interface.len + 1) + 12),
             else => 4,
         };
     }
