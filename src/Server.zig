@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Connection = @import("Connection.zig");
-const IdAllocator = @import("IdAllocator.zig");
 const posix = std.posix;
 
 const Server = @This();
@@ -36,7 +35,6 @@ pub const AcceptError = posix.AcceptError;
 
 /// Accept an incoming client connection and return a `Connection` to exchange messages
 /// with the new client.
-pub fn accept(self: Server, ida: IdAllocator) AcceptError!Connection {
-    const conn_fd = try posix.accept(self.handle, null, null, 0);
-    return Connection{ .handle = conn_fd, .ida = ida };
+pub fn accept(self: Server) AcceptError!Connection {
+    return Connection{ .handle = try posix.accept(self.handle, null, null, 0) };
 }

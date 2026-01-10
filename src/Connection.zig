@@ -4,7 +4,6 @@
 const std = @import("std");
 const wire = @import("wire.zig");
 const cmsg = @import("cmsg.zig");
-const IdAllocator = @import("IdAllocator.zig");
 const posix = std.posix;
 const control_buf_len = cmsg.space(wire.libwayland_max_message_args);
 const default_head_bytes = std.mem.toBytes(cmsg.Header{ .len = cmsg.length(0) });
@@ -12,7 +11,6 @@ const default_head_bytes = std.mem.toBytes(cmsg.Header{ .len = cmsg.length(0) })
 const Connection = @This();
 
 handle: posix.fd_t,
-ida: IdAllocator,
 
 read_buf: [4096]u8 align(4) = @splat(0),
 write_buf: [4096]u8 align(4) = @splat(0),

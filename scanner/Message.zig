@@ -220,11 +220,12 @@ fn emitConstructor(
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
+    try writer.writeAll("\t\tida: *IdAllocator,\n");
     for (self.args) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
     try writer.print("\t) core.MessageSendError!{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
-    try writer.print("\t\tconst {s}_ = try connection.ida.alloc();\n", .{return_arg.name});
+    try writer.print("\t\tconst {s}_ = try ida.alloc();\n", .{return_arg.name});
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
 
     try self.emitSerialize(writer);
@@ -260,12 +261,13 @@ fn emitGenericConstructor(
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
+    try writer.writeAll("\t\tida: *IdAllocator,\n");
     try writer.writeAll("\t\tcomptime T: type,\n");
     try writer.writeAll("\t\tversion: T.Version,\n");
     for (self.args) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
     try writer.writeAll("\t) core.MessageSendError!T {\n");
-    try writer.writeAll("\t\tconst new_id = try connection.ida.alloc();\n");
+    try writer.writeAll("\t\tconst new_id = try ida.create(T);\n");
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
 
     try self.emitSerialize(writer);
@@ -278,7 +280,7 @@ fn emitGenericConstructor(
         try writer.writeAll("\t\t});\n");
     }
 
-    try writer.writeAll("\t\treturn @enumFromInt(new_id);\n");
+    try writer.writeAll("\t\treturn new_id;\n");
 
     try writer.writeAll("\t}\n\n");
 }
@@ -295,7 +297,7 @@ fn emitSerialize(
         for (self.args) |arg| switch (arg.type) {
             .fd => {},
             .any_new_id => try writer.writeAll(
-                "\t\t\twire.GenericNewId.init(T, version, new_id),\n",
+                "\t\t\twire.GenericNewId.init(T, version, new_id.getId()),\n",
             ),
             else => try writer.print("\t\t\t{s}_,\n", .{arg.name}),
         };

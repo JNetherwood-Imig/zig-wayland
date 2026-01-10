@@ -109,6 +109,7 @@ fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
+    try writer.writeAll("const IdAllocator = core.IdAllocator;\n");
     try writer.writeAll("const Fixed = core.Fixed;\n");
     try writer.print("const {s} = @This();\n", .{self.name});
     for (imports) |raw_import| {
