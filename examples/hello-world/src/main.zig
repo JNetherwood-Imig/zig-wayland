@@ -12,6 +12,7 @@ const height = 256;
 
 // State variables
 var configured: bool = false;
+var ida: wayland.IdAllocator = .empty_client;
 var conn: wayland.Connection = undefined;
 var handler: EventHandler = undefined;
 const disp: wl.Display = .display; // wl_display has always has the special reserved id of 1.
@@ -26,14 +27,13 @@ var shm_data: []align(4096) u8 = &.{};
 pub fn main() !void {
     // Create ID allocator backed by small buffer
     var id_buf: [16]u32 = undefined;
-    var ida_state = wayland.IdAllocator.Bounded.init(&id_buf, .client);
-    const ida = ida_state.id_allocator();
+    ida = wayland.IdAllocator.initBounded(.client, &id_buf);
 
     // Using `.auto` here defers socket resolution until connect time.
     var sock_info: wayland.SocketInfo = .auto;
     // Connect to the socket, storing the resolved socket info in `sock_info` so that it can be
     // used in the error message if connecting fails.
-    conn = sock_info.connect(ida) catch |err| {
+    conn = sock_info.connect() catch |err| {
         std.log.err("Failed to connect to {f}.", .{sock_info});
         return err;
     };
@@ -49,11 +49,11 @@ pub fn main() !void {
     try handler.addObjectBounded(disp);
 
     // Create and register registry
-    reg = try disp.getRegistry(&conn);
+    reg = try disp.getRegistry(&conn, &ida);
     try handler.addObjectBounded(reg);
 
     // Sync display to know when all registry globals have been received
-    const sync_cb = try disp.sync(&conn);
+    const sync_cb = try disp.sync(&conn, &ida);
     try handler.addObjectBounded(sync_cb);
 
     // Wait for all registry global events here to discover globals.
@@ -68,13 +68,13 @@ pub fn main() !void {
                 if (std.mem.eql(u8, g.interface, wl.Compositor.interface)) {
                     // The compositor interface has no events,
                     // so we don't need to add it to the handler.
-                    comp = try reg.bind(&conn, wl.Compositor, .v1, g.name);
+                    comp = try reg.bind(&conn, &ida, wl.Compositor, .v1, g.name);
                     try handler.addObjectBounded(comp);
                 } else if (std.mem.eql(u8, g.interface, wl.Shm.interface)) {
-                    shm = try reg.bind(&conn, wl.Shm, .v1, g.name);
+                    shm = try reg.bind(&conn, &ida, wl.Shm, .v1, g.name);
                     try handler.addObjectBounded(shm);
                 } else if (std.mem.eql(u8, g.interface, xdg.WmBase.interface)) {
-                    wm_base = try reg.bind(&conn, xdg.WmBase, .v1, g.name);
+                    wm_base = try reg.bind(&conn, &ida, xdg.WmBase, .v1, g.name);
                     try handler.addObjectBounded(wm_base);
                 }
             },
@@ -89,11 +89,11 @@ pub fn main() !void {
     std.debug.assert(comp != .invalid and shm != .invalid and wm_base != .invalid);
 
     // Create and register wl_surface, xdg_surface, and xdg_toplevel
-    surf = try comp.createSurface(&conn);
+    surf = try comp.createSurface(&conn, &ida);
     try handler.addObjectBounded(surf);
-    const xdg_surf = try wm_base.getXdgSurface(&conn, surf);
+    const xdg_surf = try wm_base.getXdgSurface(&conn, &ida, surf);
     try handler.addObjectBounded(xdg_surf);
-    const toplevel = try xdg_surf.getToplevel(&conn);
+    const toplevel = try xdg_surf.getToplevel(&conn, &ida);
     try handler.addObjectBounded(toplevel);
 
     // Perform initial surface commit to begin surface lifecycle.
@@ -124,7 +124,7 @@ pub fn main() !void {
             // object from the event handler.
             .delete_id => |id| {
                 try handler.delObject(id.id);
-                try ida.free(id.id);
+                try ida.freeBounded(id.id);
             },
             // Much more advanced handling of the error event could easily be done,
             // but it is unnecessary for the scope of this example.
@@ -158,11 +158,11 @@ fn createBuffer() !void {
     // Fill buffer with white pixels.
     @memset(shm_data, 255);
 
-    const pool = try shm.createPool(&conn, fd, size);
+    const pool = try shm.createPool(&conn, &ida, fd, size);
     defer pool.destroy(&conn) catch {};
     try handler.addObjectBounded(pool);
 
-    buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
+    buffer = try pool.createBuffer(&conn, &ida, 0, width, height, stride, .argb8888);
     try handler.addObjectBounded(buffer);
 }
 

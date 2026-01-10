@@ -11,13 +11,11 @@ pub fn main() !void {
     const gpa = gpa_state.allocator();
 
     // Setup ID allocator
-    var ida_state = try wayland.IdAllocator.Unbounded.init(gpa, .client, 8);
-    defer ida_state.deinit();
-    const ida = ida_state.id_allocator();
+    var ida = wayland.IdAllocator.empty_client;
 
     // Connecto to server
     var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect(ida);
+    var conn = try sock_info.connect();
     defer conn.deinit();
 
     // Initialize event handler
@@ -27,10 +25,10 @@ pub fn main() !void {
     const disp: wl.Display = .display;
     try handler.addObject(gpa, disp);
 
-    const reg = try disp.getRegistry(&conn);
+    const reg = try disp.getRegistry(&conn, &ida);
     try handler.addObject(gpa, reg);
 
-    const sync_cb = try disp.sync(&conn);
+    const sync_cb = try disp.sync(&conn, &ida);
     try handler.addObject(gpa, sync_cb);
 
     var comp: wl.Compositor = .invalid;
@@ -40,12 +38,12 @@ pub fn main() !void {
         .wl_registry => |reg_ev| switch (reg_ev) {
             .global => |glob| {
                 if (std.mem.eql(u8, glob.interface, wl.Compositor.interface)) {
-                    comp = try reg.bind(&conn, wl.Compositor, .v6, glob.name);
+                    comp = try reg.bind(&conn, &ida, wl.Compositor, .v6, glob.name);
                     continue;
                 }
                 if (std.mem.eql(u8, glob.interface, hyprland.SurfaceManager.interface)) {
                     std.log.info("Found hyprland surface manager.", .{});
-                    surface_mgr = try reg.bind(&conn, hyprland.SurfaceManager, .v2, glob.name);
+                    surface_mgr = try reg.bind(&conn, &ida, hyprland.SurfaceManager, .v2, glob.name);
                     continue;
                 }
             },
@@ -64,8 +62,8 @@ pub fn main() !void {
         return error.SurfaceManagerNotFound;
     }
 
-    const surface = try comp.createSurface(&conn);
-    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, surface);
+    const surface = try comp.createSurface(&conn, &ida);
+    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, &ida, surface);
 
     // We won't actually do anything now since this is just a brief demo for building
     // and using custom protocols.

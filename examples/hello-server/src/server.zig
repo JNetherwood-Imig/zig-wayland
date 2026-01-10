@@ -20,11 +20,7 @@ pub fn main() !void {
     if (server.waitForConnection(10 * std.time.ms_per_s)) {
         log.info("Got connection!", .{});
 
-        var ida_buf: [32]u32 = undefined;
-        var ida_state = wayland.IdAllocator.Bounded.init(&ida_buf, .server);
-        const ida = ida_state.id_allocator();
-
-        var conn = try server.accept(ida);
+        var conn = try server.accept();
         defer conn.deinit();
 
         var client_interface_buf: [32]?[:0]const u8 = @splat(null);
