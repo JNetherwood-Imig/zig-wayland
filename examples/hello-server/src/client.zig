@@ -5,13 +5,15 @@ const Event = wayland.MessageUnion(.{wl});
 const EventHandler = wayland.MessageHandler(Event);
 const log = std.log.scoped(.client);
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var id_buf: [8]u32 = undefined;
     var ida = wayland.IdAllocator.initBounded(.client, &id_buf);
 
     var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect();
-    defer conn.deinit();
+    var conn = try sock_info.connect(init, io);
+    defer conn.deinit(io);
 
     var client_interface_buf: [64]?[:0]const u8 = @splat(null);
     var handler = EventHandler.initBuffered(&client_interface_buf, &.{});
@@ -19,13 +21,13 @@ pub fn main() !void {
     const disp: wl.Display = .display;
     try handler.addObjectBounded(disp);
 
-    const reg = try disp.getRegistry(&conn, &ida);
+    const reg = try disp.getRegistry(io, &conn, &ida);
     try handler.addObjectBounded(reg);
 
-    const sync = try disp.sync(&conn, &ida);
+    const sync = try disp.sync(io, &conn, &ida);
     try handler.addObjectBounded(sync);
 
-    while (handler.waitNextMessage(&conn)) |msg| switch (msg) {
+    while (handler.waitNextMessage(io, &conn, .none)) |msg| switch (msg) {
         .wl_registry => |ev| try handleRegistryEvent(ev),
         .wl_callback => |ev| {
             log.info("Got callback done with data {d}.", .{ev.done.callback_data});
@@ -42,7 +44,7 @@ pub fn main() !void {
     } else |err| return err;
 }
 
-fn handleRegistryEvent(ev: std.meta.fieldInfo(Event, .wl_registry).type) !void {
+fn handleRegistryEvent(ev: @FieldType(Event, "wl_registry")) !void {
     switch (ev) {
         .global => |glob| {
             log.info("Global: {d}: {s} (version {d}).", .{

@@ -24,25 +24,25 @@ pub fn main(init: std.process.Init) !void {
     const disp: wl.Display = .display;
     try handler.addObject(gpa, disp);
 
-    const reg = try disp.getRegistry(&conn, &ida);
+    const reg = try disp.getRegistry(io, &conn, &ida);
     try handler.addObject(gpa, reg);
 
-    const sync_cb = try disp.sync(&conn, &ida);
+    const sync_cb = try disp.sync(io, &conn, &ida);
     try handler.addObject(gpa, sync_cb);
 
     var comp: wl.Compositor = .invalid;
     var surface_mgr: hyprland.SurfaceManager = .invalid;
 
-    while (handler.waitNextMessage(&conn)) |ev| switch (ev) {
+    while (handler.waitNextMessage(io, &conn, .none)) |ev| switch (ev) {
         .wl_registry => |reg_ev| switch (reg_ev) {
             .global => |glob| {
                 if (std.mem.eql(u8, glob.interface, wl.Compositor.interface)) {
-                    comp = try reg.bind(&conn, &ida, wl.Compositor, .v6, glob.name);
+                    comp = try reg.bind(io, &conn, &ida, wl.Compositor, .v6, glob.name);
                     continue;
                 }
                 if (std.mem.eql(u8, glob.interface, hyprland.SurfaceManager.interface)) {
                     std.log.info("Found hyprland surface manager.", .{});
-                    surface_mgr = try reg.bind(&conn, &ida, hyprland.SurfaceManager, .v2, glob.name);
+                    surface_mgr = try reg.bind(io, &conn, &ida, hyprland.SurfaceManager, .v2, glob.name);
                     continue;
                 }
             },
@@ -61,15 +61,15 @@ pub fn main(init: std.process.Init) !void {
         return error.SurfaceManagerNotFound;
     }
 
-    const surface = try comp.createSurface(&conn, &ida);
-    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, &ida, surface);
+    const surface = try comp.createSurface(io, &conn, &ida);
+    const hyprland_surf = try surface_mgr.getHyprlandSurface(io, &conn, &ida, surface);
 
     // We won't actually do anything now since this is just a brief demo for building
     // and using custom protocols.
     std.log.info("Created hyprland surface, exiting...", .{});
 
-    try hyprland_surf.destroy(&conn);
-    try surface.destroy(&conn);
+    try hyprland_surf.destroy(io, &conn);
+    try surface.destroy(io, &conn);
 
-    try surface_mgr.destroy(&conn);
+    try surface_mgr.destroy(io, &conn);
 }
