@@ -178,6 +178,7 @@ fn emitNormal(
 
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
     try writer.writeAll("\t) core.MessageSendError!void {\n");
@@ -185,10 +186,10 @@ fn emitNormal(
     try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
     try self.emitSerialize(writer);
 
-    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
 
     if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
         for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
     }
@@ -219,6 +220,7 @@ fn emitConstructor(
 
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
     try writer.writeAll("\t\tida: *IdAllocator,\n");
     for (self.args) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
@@ -230,10 +232,10 @@ fn emitConstructor(
 
     try self.emitSerialize(writer);
 
-    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
 
     if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
         for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
     }
@@ -260,6 +262,7 @@ fn emitGenericConstructor(
     };
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
+    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
     try writer.writeAll("\t\tida: *IdAllocator,\n");
     try writer.writeAll("\t\tcomptime T: type,\n");
@@ -272,10 +275,10 @@ fn emitGenericConstructor(
 
     try self.emitSerialize(writer);
 
-    try writer.writeAll("\t\ttry connection.put(message[0..serialized_len]);\n");
+    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
 
     if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(&.{\n");
+        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
         for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t});\n");
     }

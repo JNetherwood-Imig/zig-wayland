@@ -66,7 +66,7 @@ pub const Fixed = packed struct(i32) {
 
     /// Allow for printing of a `Fixed` using the format string `"{d}"`.
     /// It will be printed as an `f64`.
-    pub fn formatNumber(self: Fixed, writer: *std.io.Writer, number: std.fmt.Number) !void {
+    pub fn formatNumber(self: Fixed, writer: *std.Io.Writer, number: std.fmt.Number) !void {
         try writer.printFloat(self.to(f64), number);
     }
 };

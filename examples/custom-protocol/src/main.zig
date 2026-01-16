@@ -5,18 +5,17 @@ const hyprland = @import("hyprland_surface");
 const Event = wayland.MessageUnion(.{ wl, hyprland });
 const EventHandler = wayland.MessageHandler(Event);
 
-pub fn main() !void {
-    var gpa_state: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
 
     // Setup ID allocator
-    var ida = wayland.IdAllocator.empty_client;
+    var ida: wayland.IdAllocator = .empty_client;
 
     // Connecto to server
     var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect();
-    defer conn.deinit();
+    var conn = try sock_info.connect(init, io);
+    defer conn.deinit(io);
 
     // Initialize event handler
     var handler = try EventHandler.initCapacity(gpa, 8);

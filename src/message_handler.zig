@@ -169,29 +169,41 @@ pub fn MessageHandler(comptime Message: type) type {
 
         pub const GetMessageError = DeserializeError ||
             Connection.FlushError ||
-            Connection.PollEventsError ||
             Connection.ReadIncomingError ||
             error{ InvalidObject, MessageTooLong };
 
         /// Try to get an message from the `connection`,
         /// immediately returning `null` if the buffers are empty and the socket is not readable.
-        pub fn getNextMessage(self: *Self, connection: *Connection) GetMessageError!?Message {
-            return self.nextMessage(connection, false);
+        pub fn getNextMessage(
+            self: *Self,
+            io: std.Io,
+            connection: *Connection,
+        ) GetMessageError!?Message {
+            return self.nextMessage(io, connection, .{ .duration = .{
+                .raw = .zero,
+                .clock = .awake,
+            } });
         }
 
         /// Wait indefinately for an message to be received.
-        pub fn waitNextMessage(self: *Self, connection: *Connection) GetMessageError!Message {
-            while (true) if (try self.nextMessage(connection, true)) |ev| return ev;
+        pub fn waitNextMessage(
+            self: *Self,
+            io: std.Io,
+            connection: *Connection,
+            timeout: std.Io.Timeout,
+        ) GetMessageError!Message {
+            while (true) if (try self.nextMessage(io, connection, timeout)) |ev| return ev;
         }
 
         fn nextMessage(
             self: *Self,
+            io: std.Io,
             conn: *Connection,
-            wait: bool,
+            timeout: std.Io.Timeout,
         ) GetMessageError!?Message {
             // Always start by flushing buffered messages
-            conn.flush() catch |err| switch (err) {
-                error.BrokenPipe => {},
+            conn.flush(io) catch |err| switch (err) {
+                error.SocketUnconnected => {},
                 else => |e| return e,
             };
 
@@ -199,11 +211,7 @@ pub fn MessageHandler(comptime Message: type) type {
                 // Try to get a header, otherwise poll for messages,
                 // returning null if polling times out
                 const header = conn.peekHeader() orelse {
-                    conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
-                        error.Timeout => return null,
-                        else => |e| return e,
-                    };
-                    try conn.readIncoming();
+                    try conn.readIncoming(io, timeout);
                     continue :outer;
                 };
 
@@ -211,11 +219,7 @@ pub fn MessageHandler(comptime Message: type) type {
                     return error.MessageTooLong;
 
                 const message = conn.peek(header.length) orelse {
-                    conn.pollEvents(if (wait) -1 else 0) catch |err| switch (err) {
-                        error.Timeout => return null,
-                        else => |e| return e,
-                    };
-                    try conn.readIncoming();
+                    try conn.readIncoming(io, timeout);
                     continue :outer;
                 };
                 const body = message[@sizeOf(wire.Header)..];

@@ -106,6 +106,7 @@ pub fn emitServerCode(
 }
 
 fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []const u8) !void {
+    try writer.writeAll("const std = @import(\"std\");\n");
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
