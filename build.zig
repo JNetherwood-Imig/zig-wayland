@@ -56,6 +56,10 @@ pub fn build(b: *std.Build) void {
     const docs_step = b.step("docs", "Install docs into zig-out/docs");
     docs_step.dependOn(&install_docs.step);
 
+    const check_exe = b.addObject(.{ .name = "check", .root_module = core });
+    const check_step = b.step("check", "ZLS check.");
+    check_step.dependOn(&check_exe.step);
+
     const dep_dir = makeProtocolDeps(
         b,
         scanner,

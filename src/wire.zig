@@ -3,10 +3,17 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+
 const Fixed = @import("fixed.zig").Fixed;
+
+const log = std.log.scoped(.wayland_wire);
 
 pub const libwayland_max_message_size = 4096;
 pub const libwayland_max_message_args = 20;
+pub const client_min_id = 0x00000002;
+pub const client_max_id = 0xfeffffff;
+pub const server_min_id = 0xff000000;
+pub const server_max_id = 0xfffffffe;
 
 /// Two-word message header containing target object id, message opcode, and length in bytes,
 /// including the header.
@@ -47,7 +54,12 @@ pub const SerializeError = error{MessageTooLong};
 /// Returns the length of the serialized message, including the header.
 /// Returns `error.MessageTooLong` if the length of the message would exceed the libwayland-imposed
 /// maximum message size of 4096 or overflow `buf`.
-pub fn serializeMessage(buf: []u8, object: u32, opcode: u16, args: anytype) SerializeError!usize {
+pub fn serializeMessage(
+    buf: []u8,
+    object: u32,
+    comptime opcode: u16,
+    args: anytype,
+) SerializeError!usize {
     comptime if (std.meta.fields(@TypeOf(args)).len > libwayland_max_message_args)
         @compileError("Too many args.");
 
@@ -179,7 +191,7 @@ test "serialize optional object" {
 
 /// Writes the backing i32 of `fixed` to the beginning of `buffer` and returns `@sizeOf(i32)`.
 fn serializeFixed(buffer: []u8, fixed: Fixed) usize {
-    return serializeInt(buffer, @bitCast(fixed));
+    return serializeInt(buffer, @intFromEnum(fixed));
 }
 
 test "serialize fixed" {
@@ -353,7 +365,7 @@ test "deserialize uint" {
 fn deserializeFixed(data: []const u8) DeserializeError!struct { Fixed, usize } {
     if (data.len < 4) return error.InvalidArguments;
     const raw, _ = try deserializeInt(data);
-    return .{ @bitCast(raw), 4 };
+    return .{ @enumFromInt(raw), 4 };
 }
 
 test "deserialize fixed" {

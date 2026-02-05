@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const sys = std.posix.system;
+const Address = @import("Addresss.zig");
 
 const Connection = @import("Connection.zig");
 
@@ -25,7 +26,7 @@ pub const AcceptError = std.Io.net.Server.AcceptError;
 
 /// Accept an incoming client connection and return a `Connection` to exchange messages
 /// with the new client.
-pub fn accept(self: *Server, io: std.Io) AcceptError!Connection {
+pub fn accept(self: *Server, io: std.Io, gpa: std.mem.Allocator) AcceptError!Connection {
     const stream = try self.inner.accept(io);
-    return Connection{ .socket = stream.socket };
+    return Connection.fromStreamUnbounded(io, gpa, stream, .server);
 }

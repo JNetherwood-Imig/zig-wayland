@@ -178,21 +178,23 @@ fn emitNormal(
 
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) core.MessageSendError!void {\n");
+    try writer.writeAll("\t) !void {\n");
 
-    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
-    try self.emitSerialize(writer);
-
-    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
-
-    if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
-        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-        try writer.writeAll("\t\t});\n");
+    try writer.writeAll("\t\ttry connection.sendMessage(\n");
+    try writer.writeAll("\t\t\tself.getId(),\n");
+    try writer.print("\t\t\t{s}_message_length,\n", .{self.name});
+    try writer.print("\t\t\t{s}_message_opcode,\n", .{self.name});
+    try writer.writeAll("\t\t\t.{\n");
+    for (self.args) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+    try writer.writeAll("\t\t\t},\n");
+    if (fd_count == 0) try writer.writeAll("\t\t\t&.{},\n") else {
+        try writer.writeAll("\t\t\t&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+        try writer.writeAll("\t\t\t},\n");
     }
+    try writer.writeAll("\t\t);\n");
 
     try writer.writeAll("\t}\n\n");
 }
@@ -220,27 +222,33 @@ fn emitConstructor(
 
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
-    try writer.writeAll("\t\tida: *IdAllocator,\n");
+    try writer.writeAll("\t\tgpa: std.mem.Allocator,\n");
     for (self.args) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
-    try writer.print("\t) core.MessageSendError!{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
+    try writer.print("\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
 
-    try writer.print("\t\tconst {s}_ = try ida.alloc();\n", .{return_arg.name});
-    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
+    try writer.print("\t\tconst {s}_ = try connection.createObject({s}.{s}, gpa);\n", .{
+        return_arg.name,
+        entry.protocol,
+        entry.type_name,
+    });
 
-    try self.emitSerialize(writer);
-
-    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
-
-    if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
-        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-        try writer.writeAll("\t\t});\n");
+    try writer.writeAll("\t\ttry connection.sendMessage(\n");
+    try writer.writeAll("\t\t\tself.getId(),\n");
+    try writer.print("\t\t\t{s}_message_length,\n", .{self.name});
+    try writer.print("\t\t\t{s}_message_opcode,\n", .{self.name});
+    try writer.writeAll("\t\t\t.{\n");
+    for (self.args) |arg| if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+    try writer.writeAll("\t\t\t},\n");
+    if (fd_count == 0) try writer.writeAll("\t\t\t&.{},\n") else {
+        try writer.writeAll("\t\t\t&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+        try writer.writeAll("\t\t\t},\n");
     }
+    try writer.writeAll("\t\t);\n");
 
-    try writer.print("\t\treturn @enumFromInt({s}_);\n", .{return_arg.name});
+    try writer.print("\t\treturn {s}_;\n", .{return_arg.name});
 
     try writer.writeAll("\t}\n\n");
 }
@@ -262,26 +270,33 @@ fn emitGenericConstructor(
     };
     try writer.print("\tpub fn {s}(\n", .{fn_name});
     try writer.print("\t\tself: {s},\n", .{parent_interface});
-    try writer.writeAll("\t\tio: std.Io,\n");
     try writer.writeAll("\t\tconnection: *Connection,\n");
-    try writer.writeAll("\t\tida: *IdAllocator,\n");
+    try writer.writeAll("\t\tgpa: std.mem.Allocator,\n");
     try writer.writeAll("\t\tcomptime T: type,\n");
     try writer.writeAll("\t\tversion: T.Version,\n");
     for (self.args) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) core.MessageSendError!T {\n");
-    try writer.writeAll("\t\tconst new_id = try ida.create(T);\n");
-    try writer.print("\t\tvar message: [{s}_message_length]u8 = undefined;\n", .{self.name});
+    try writer.writeAll("\t) !T {\n");
 
-    try self.emitSerialize(writer);
+    try writer.writeAll("\t\tconst new_id = try connection.createObject(T, gpa);\n");
 
-    try writer.writeAll("\t\ttry connection.put(io, message[0..serialized_len]);\n");
-
-    if (fd_count > 0) {
-        try writer.writeAll("\t\ttry connection.putFds(io, &.{\n");
-        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t{s}_,\n", .{arg.name});
-        try writer.writeAll("\t\t});\n");
+    try writer.writeAll("\t\ttry connection.sendMessage(\n");
+    try writer.writeAll("\t\t\tself.getId(),\n");
+    try writer.print("\t\t\t{s}_message_length,\n", .{self.name});
+    try writer.print("\t\t\t{s}_message_opcode,\n", .{self.name});
+    try writer.writeAll("\t\t\t.{\n");
+    for (self.args) |arg| {
+        if (arg.type == .any_new_id) {
+            try writer.writeAll("\t\t\twire.GenericNewId.init(T, version, new_id.getId()),\n");
+        } else if (arg.type != .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
     }
+    try writer.writeAll("\t\t\t},\n");
+    if (fd_count == 0) try writer.writeAll("\t\t\t&.{},\n") else {
+        try writer.writeAll("\t\t\t&.{\n");
+        for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
+        try writer.writeAll("\t\t\t},\n");
+    }
+    try writer.writeAll("\t\t);\n");
 
     try writer.writeAll("\t\treturn new_id;\n");
 

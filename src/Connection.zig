@@ -1,221 +1,470 @@
-//! Buffered socket abstraction for exchanging messages according to the wayland wire format.
-//! See `wire.zig` for serialization and deserialization information.
-
 const std = @import("std");
+
+const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
+const Address = @import("Addresss.zig");
 const wire = @import("wire.zig");
+const cmsg = @import("cmsg.zig");
+
+const log = std.log.scoped(.wayland_connection);
 
 const Connection = @This();
 
-socket: std.Io.net.Socket,
+stream: std.Io.net.Stream,
 
-read_buf: [wire.libwayland_max_message_size]u8 align(4) = @splat(0),
-write_buf: [wire.libwayland_max_message_size]u8 align(4) = @splat(0),
-fd_read_buf: [wire.libwayland_max_message_args]i32 = @splat(-1),
-fd_write_buf: [wire.libwayland_max_message_args]i32 = @splat(-1),
+io: std.Io,
+map: ObjectInterfaceMap,
 
-reader_start: usize = 0,
-reader_end: usize = 0,
-reader_fd_start: usize = 0,
-reader_fd_end: usize = 0,
+data_in: Buffer(wire.libwayland_max_message_size, u8) = .{},
+data_out: Buffer(wire.libwayland_max_message_size, u8) = .{},
+fd_in: Buffer(wire.libwayland_max_message_args, std.posix.fd_t) = .{},
+fd_out: Buffer(wire.libwayland_max_message_args, std.posix.fd_t) = .{},
 
-writer_end: usize = 0,
-writer_fd_end: usize = 0,
+next_id: u32 = wire.client_min_id,
+id_free_list: std.ArrayList(u32) = .empty,
+min_id: u32 = wire.client_min_id,
+max_id: u32 = wire.client_max_id,
 
-/// Close the underlying connection file descriptor.
-pub fn deinit(self: *Connection, io: std.Io) void {
-    self.socket.close(io);
+pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
+    var map: ObjectInterfaceMap = try .init(gpa);
+    errdefer map.deinit(gpa);
+
+    const stream = try connectToAddress(io, addr);
+
+    return Connection{
+        .stream = stream,
+        .io = io,
+        .map = map,
+    };
+}
+
+/// Takes ownership of Stream.
+pub fn fromStream(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    stream: std.Io.net.Stream,
+    side: ProtocolSide,
+) !Connection {
+    return Connection{
+        .io = io,
+        .map = try .initUnbounded(gpa),
+        .stream = stream,
+        .next_id = switch (side) {
+            .client => wire.client_min_id,
+            .server => wire.server_min_id,
+        },
+        .min_id = switch (side) {
+            .client => wire.client_min_id,
+            .server => wire.server_min_id,
+        },
+        .max_id = switch (side) {
+            .client => wire.client_max_id,
+            .server => wire.server_max_id,
+        },
+    };
+}
+
+pub fn deinit(self: *Connection, io: std.Io, gpa: std.mem.Allocator) void {
+    self.id_free_list.deinit(gpa);
+    self.map.deinit(gpa);
+    self.stream.close(io);
     self.* = undefined;
 }
 
-/// Returns either a slice of `n` bytes from the buffer, or null if there are less than `n` bytes
-/// available.
-/// Does not advance the head of the read buffer.
-pub fn peek(self: *const Connection, n: usize) ?[]const u8 {
-    if (self.reader_end - self.reader_start < n) return null;
-    return self.read_buf[self.reader_start..][0..n];
-}
+pub fn sendMessage(
+    self: *Connection,
+    sender_id: u32,
+    comptime len: usize,
+    comptime opcode: u16,
+    args: anytype,
+    fds: []const std.posix.fd_t,
+) !void {
+    var buf: [len]u8 = undefined;
+    const serialized = try wire.serializeMessage(&buf, sender_id, opcode, args);
+    const res1 = self.data_out.put(buf[0..serialized]);
+    const res2 = self.fd_out.put(fds);
 
-/// Returns the next 8 bytes from the buffer, interpreted as a `wire.Header`.
-/// This function does not discard what it reads, so subsequent calls will return the same data
-/// until `dsicard` is called.
-pub fn peekHeader(self: *const Connection) ?wire.Header {
-    if (self.peek(@sizeOf(wire.Header))) |buf| {
-        return std.mem.bytesToValue(wire.Header, buf);
+    if (res1) |_| {} else |_| {
+        @branchHint(.unlikely);
+        try self.flush();
+        try self.data_out.put(buf[0..serialized]);
     }
 
-    return null;
+    if (res2) |_| {} else |_| {
+        @branchHint(.unlikely);
+        try self.flush();
+        try self.fd_out.put(fds);
+    }
 }
 
-/// Advances the head of the buffer `n` bytes.
-pub fn discard(self: *Connection, n: usize) void {
-    std.debug.assert(self.reader_start + n <= self.reader_end);
-    self.reader_start += n;
-}
+pub fn nextMessage(
+    self: *Connection,
+    comptime Message: type,
+    timeout: ?std.Io.Timeout,
+) !Message {
+    const deadline = if (timeout) |t| switch (t) {
+        .none, .deadline => t,
+        .duration => |dur| t: {
+            const now = try dur.clock.now(self.io);
+            break :t std.Io.Timeout{ .deadline = .{ .clock = dur.clock, .raw = now.addDuration(dur.raw) } };
+        },
+    } else std.Io.Timeout{ .duration = .{ .clock = .awake, .raw = .{ .nanoseconds = 0 } } };
 
-/// Returns either a slice of `n` fds from the fd buffer, or null if there are less than `n` fds
-/// available.
-/// Does not advance the head of the fd buffer.
-pub fn peekFds(self: *const Connection, n: usize) ?[]const i32 {
-    if (n > self.reader_fd_end - self.reader_fd_start) return null;
-    return self.fd_read_buf[self.reader_fd_start..][0..n];
-}
-
-/// Advances the head of the fd buffer `n` fds.
-pub fn discardFds(self: *Connection, n: usize) void {
-    std.debug.assert(n <= self.reader_fd_end - self.reader_fd_start);
-    self.reader_fd_start += n;
-}
-
-pub const ReadIncomingError = std.Io.net.Socket.ReceiveTimeoutError || error{ConnectionClosed};
-
-/// Read and buffer incoming data and fds.
-pub fn readIncoming(self: *Connection, io: std.Io, timeout: std.Io.Timeout) ReadIncomingError!void {
-    // Start by shifting leftover bytes to the start of the buffer to make room for incoming data.
-    self.resetReader();
-
-    var buf: [4096]u8 = undefined;
-    var control: [96]u8 align(8) = @splat(0);
-    var message = std.Io.net.IncomingMessage{
-        .data = &.{},
-        .control = &control,
-        .flags = undefined,
-        .from = undefined,
+    self.flush() catch |err| switch (err) {
+        error.SocketUnconnected => {},
+        else => |e| return e,
     };
 
-    const maybe_err, const count = self.socket.receiveManyTimeout(
-        io,
-        (&message)[0..1],
-        &buf,
-        .{},
-        timeout,
-    );
-
-    if (maybe_err) |err| return err;
-    std.debug.assert(count == 1);
-
-    const read = message.data;
-    if (read.len == 0) return error.ConnectionClosed;
-
-    std.debug.assert(read.len < self.read_buf.len - self.reader_end);
-    @memcpy(self.read_buf[self.reader_end..][0..read.len], read);
-    self.reader_end += read.len;
-
-    const fds = std.mem.bytesAsSlice(i32, message.control);
-    std.debug.assert(self.reader_fd_end + fds.len < self.fd_read_buf.len);
-    @memcpy(self.fd_read_buf[self.reader_fd_end..][0..fds.len], fds);
-    self.reader_fd_end += 1;
-}
-
-fn resetReader(self: *Connection) void {
-    const len = self.reader_end - self.reader_start;
-    if (len > 0) {
-        if (self.reader_start > len)
-            @memcpy(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len])
-        else
-            @memmove(self.read_buf[0..len], self.read_buf[self.reader_start..][0..len]);
-    }
-    self.reader_start = 0;
-    self.reader_end = len;
-
-    const fd_len = self.reader_fd_end - self.reader_fd_start;
-    if (fd_len > 0) {
-        if (self.reader_fd_start > fd_len)
-            @memcpy(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len])
-        else
-            @memmove(self.fd_read_buf[0..fd_len], self.fd_read_buf[self.reader_fd_start..][0..fd_len]);
-    }
-    self.reader_fd_start = 0;
-    self.reader_fd_end = fd_len;
-}
-
-pub const PutError = FlushError || error{MessageTooLong};
-
-/// Write all of `bytes` to the underlying buffer, flushing as many times as is necessary
-/// to ensure that all bytes are sent.
-///
-/// See `flush` for error information.
-pub fn put(self: *Connection, io: std.Io, bytes: []const u8) PutError!void {
-    if (bytes.len > wire.libwayland_max_message_size)
-        return error.MessageTooLong;
-
-    var written: usize = 0;
-    while (written < bytes.len) {
-        if (self.writer_end == self.write_buf.len) try self.flush(io);
-        const len = @min(bytes.len, self.write_buf.len - self.writer_end);
-        @memcpy(self.write_buf[self.writer_end..][0..len], bytes[written..][0..len]);
-        self.writer_end += len;
-        written += len;
-    }
-}
-
-pub const PutFdsError = FlushError || error{
-    TooManyFds,
-    BadFd,
-    ProcessFdQuotaExceeded,
-    Unexpected,
-};
-
-/// Write all of `fds` to the control buffer, incrementing the cmsg.Header data encoded at the
-/// start of the buffer to match. This function will flush the buffers if there is insufficient
-/// space to accomodate `fds`.
-///
-/// See `flush` for error information.
-pub fn putFds(self: *Connection, io: std.Io, fds: []const i32) PutFdsError!void {
-    if (fds.len > wire.libwayland_max_message_args)
-        return error.TooManyFds;
-
-    for (fds) |fd| {
-        if (self.writer_fd_end == self.fd_write_buf.len)
-            try self.flush(io);
-
-        const dup: i32 = fd: {
-            const rc = std.os.linux.dup(fd);
-            switch (std.posix.errno(rc)) {
-                .SUCCESS => break :fd @intCast(rc),
-                .BADF => return error.BadFd,
-                .MFILE => return error.ProcessFdQuotaExceeded,
-                else => |err| return std.posix.unexpectedErrno(err),
-            }
+    outer: while (true) {
+        const header = self.peekHeader() orelse {
+            try self.readIncoming(deadline);
+            continue :outer;
         };
-        self.fd_write_buf[self.writer_fd_end] = dup;
-        self.writer_fd_end += 1;
+
+        if (header.length > wire.libwayland_max_message_size)
+            return error.MessageTooLong;
+
+        const message = self.data_in.peek(header.length) orelse {
+            try self.readIncoming(deadline);
+            continue :outer;
+        };
+        const body = message[@sizeOf(wire.Header)..];
+
+        const interface = try self.map.getInterface(header.object);
+        return try self.deserializeMessage(Message, header, interface, body) orelse {
+            try self.readIncoming(deadline);
+            continue :outer;
+        };
     }
 }
 
-pub const FlushError = std.Io.net.Socket.SendError || error{ConnectionClosed};
+pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator) !T {
+    const id = id: {
+        if (self.id_free_list.pop()) |id| break :id id;
 
-/// Flush the contents of both the data and fd buffers to the socket.
-pub fn flush(self: *Connection, io: std.Io) FlushError!void {
-    // We don't have anything to send.
-    if (self.writer_end == 0) return;
+        if (self.next_id > self.max_id) {
+            @branchHint(.unlikely);
+            return error.OutOfIds;
+        }
 
-    var control: [96]u8 = undefined;
-    const control_len = 16 + self.writer_fd_end * 4;
-    const rounded_control_len = (control_len + 7) & ~@as(usize, 7);
-    std.mem.bytesAsValue(extern struct {
-        len: usize,
-        level: i32,
-        type: i32,
-    }, control[0..16]).* = .{
-        .len = control_len,
-        .level = 0x01,
-        .type = 0x01,
-    };
-    @memcpy(control[16..control_len], std.mem.sliceAsBytes(self.fd_write_buf[0..self.writer_fd_end]));
-    const maybe_control = if (self.writer_fd_end > 0) control[0..rounded_control_len] else &.{};
-
-    var message = std.Io.net.OutgoingMessage{
-        .address = null,
-        // .address = &addr,
-        .control = maybe_control,
-        .data_ptr = &self.write_buf,
-        .data_len = self.writer_end,
+        defer self.next_id += 1;
+        break :id self.next_id;
     };
 
-    try self.socket.sendMany(io, (&message)[0..1], .{});
+    try self.map.add(gpa, id, T.interface);
 
-    if (message.data_len == 0) return error.ConnectionClosed;
-
-    self.writer_end = 0;
-    self.writer_fd_end = 0;
+    return @enumFromInt(id);
 }
+
+pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) !void {
+    if (id == self.next_id - 1)
+        self.next_id -= 1
+    else
+        try self.id_free_list.append(gpa, id);
+}
+
+fn flush(self: *Connection) !void {
+    const data = self.data_out.data[self.data_out.start..self.data_out.end];
+    var iov = [1]std.posix.iovec_const{.{ .base = data.ptr, .len = data.len }};
+
+    const fds = self.fd_out.data[self.fd_out.start..self.fd_out.end];
+    var control: [cmsg.space(wire.libwayland_max_message_args)]u8 = undefined;
+    std.mem.bytesAsValue(cmsg.Header, control[0..@sizeOf(cmsg.Header)]).* = .{
+        .len = cmsg.length(fds.len),
+    };
+    const dest = std.mem.bytesAsSlice(
+        std.posix.fd_t,
+        control[@sizeOf(cmsg.Header)..][0..(fds.len * @sizeOf(std.posix.fd_t))],
+    );
+    @memcpy(dest, fds);
+
+    const msg = std.posix.msghdr_const{
+        .name = null,
+        .namelen = 0,
+        .iov = &iov,
+        .iovlen = iov.len,
+        .control = &control,
+        .controllen = cmsg.length(fds.len),
+        .flags = 0,
+    };
+
+    const rc = std.posix.system.sendmsg(self.stream.socket.handle, &msg, 0);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => {},
+        .PIPE => return error.SocketUnconnected,
+        else => |err| return std.posix.unexpectedErrno(err),
+    }
+
+    self.data_out.start = 0;
+    self.data_out.end = 0;
+    self.fd_out.start = 0;
+    self.fd_out.end = 0;
+}
+
+fn peekHeader(self: *const Connection) ?wire.Header {
+    const bytes = self.data_in.peek(@sizeOf(wire.Header)) orelse return null;
+    return std.mem.bytesToValue(wire.Header, bytes);
+}
+
+fn readIncoming(self: *Connection, timeout: std.Io.Timeout) !void {
+    self.data_in.shiftToStart();
+    self.fd_in.shiftToStart();
+
+    const timeout_ms: i32 = switch (timeout) {
+        .deadline => |d| @intCast(d.raw.toMilliseconds()),
+        .none => -1,
+        else => unreachable,
+    };
+
+    var pfds = [1]std.posix.pollfd{.{
+        .fd = self.stream.socket.handle,
+        .events = std.posix.POLL.IN,
+        .revents = 0,
+    }};
+
+    const count = try std.posix.poll(&pfds, timeout_ms);
+
+    if (count == 0) return error.TimedOut;
+
+    const data = self.data_in.data[self.data_in.end..];
+    var iov = [1]std.posix.iovec{.{ .base = data.ptr, .len = data.len }};
+
+    var control: [cmsg.space(wire.libwayland_max_message_args)]u8 align(@alignOf(cmsg.Header)) = undefined;
+
+    var msg = std.posix.msghdr{
+        .name = null,
+        .namelen = 0,
+        .iov = &iov,
+        .iovlen = iov.len,
+        .control = &control,
+        .controllen = control.len,
+        .flags = 0,
+    };
+
+    const rc = std.posix.system.recvmsg(self.stream.socket.handle, &msg, std.posix.system.MSG.DONTWAIT);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => {},
+        .PIPE => return error.SocketUnconnected,
+        else => |err| return std.posix.unexpectedErrno(err),
+    }
+    self.data_in.end += rc;
+
+    var header = cmsg.firstHeader(&msg);
+    while (header) |head| {
+        const fd_bytes: []align(@alignOf(std.posix.fd_t)) const u8 = @alignCast(cmsg.data(head));
+        const fds = std.mem.bytesAsSlice(std.posix.fd_t, fd_bytes);
+        try self.fd_in.put(fds);
+        header = cmsg.nextHeader(&msg, head);
+    }
+}
+
+fn deserializeMessage(
+    self: *Connection,
+    comptime Message: type,
+    header: wire.Header,
+    interface: [:0]const u8,
+    body: []const u8,
+) !?Message {
+    // This is arbitrary, but works for now.
+    @setEvalBranchQuota(10000);
+
+    const ti = @typeInfo(Message).@"union";
+    inline for (ti.fields) |field| if (std.mem.eql(u8, field.name, interface)) {
+        const sub_fields = @typeInfo(field.type).@"union".fields;
+        switch (header.opcode) {
+            inline 0...sub_fields.len - 1 => |i| {
+                const sub_field = sub_fields[i];
+
+                const fd_count = countFds(sub_field.type);
+                const fds = self.fd_in.peek(fd_count) orelse return null;
+
+                self.data_in.discard(header.length) catch unreachable;
+                self.fd_in.discard(fd_count) catch unreachable;
+
+                var message = try wire.deserializeMessage(sub_field.type, body, fds);
+
+                const object_self_field = std.meta.fields(@TypeOf(message))[0];
+                @field(message, object_self_field.name) = @enumFromInt(header.object);
+
+                const interface_message = @unionInit(field.type, sub_field.name, message);
+                return @unionInit(Message, field.name, interface_message);
+            },
+            else => return error.InvalidOpcode,
+        }
+    };
+
+    @panic("Interface not present in generated message union.");
+}
+
+fn countFds(comptime T: type) usize {
+    comptime var count: usize = 0;
+    inline for (T._signature) |byte| if (byte == 'd') {
+        count += 1;
+    };
+    return count;
+}
+
+fn connectToAddress(io: std.Io, addr: Address) !std.Io.net.Stream {
+    return switch (addr.info) {
+        .sock => |sock| std.Io.net.Stream{ .socket = .{
+            .handle = sock,
+            .address = .{ .ip4 = .loopback(0) },
+        } },
+        .path => |path| stream: {
+            const un = std.Io.net.UnixAddress.init(std.mem.sliceTo(&path, 0)) catch unreachable;
+            break :stream un.connect(io);
+        },
+    };
+}
+
+fn Buffer(comptime length: usize, comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        data: [length]T = undefined,
+        start: usize = 0,
+        end: usize = 0,
+
+        pub fn put(self: *Self, data: []const T) !void {
+            if (self.end + data.len >= self.data.len)
+                return error.OutOfSpace;
+            @memcpy(self.data[self.end..][0..data.len], data);
+            self.end += data.len;
+        }
+
+        pub fn peek(self: *const Self, n: usize) ?[]const T {
+            if (n > self.end - self.start) return null;
+            return self.data[self.start..][0..n];
+        }
+
+        pub fn discard(self: *Self, n: usize) !void {
+            if (n > self.end - self.start) return error.DiscardTooLong;
+            self.start += n;
+            if (self.start == self.end) {
+                self.start = 0;
+                self.end = 0;
+            }
+        }
+
+        pub fn shiftToStart(self: *Self) void {
+            if (self.start == 0) return;
+            const len = self.end - self.start;
+            @memmove(self.data[0..len], self.data[self.start..self.end]);
+            self.start = 0;
+            self.end = len;
+        }
+    };
+}
+
+const ObjectInterfaceMap = struct {
+    client: []?[:0]const u8,
+    server: []?[:0]const u8,
+
+    pub fn init(gpa: std.mem.Allocator) !ObjectInterfaceMap {
+        var client_buf = try gpa.alloc(?[:0]const u8, 16);
+        errdefer gpa.free(client_buf);
+        @memset(client_buf, null);
+        client_buf[0] = "wl_display";
+
+        const server_buf = try gpa.alloc(?[:0]const u8, 4);
+
+        return ObjectInterfaceMap{ .client = client_buf, .server = server_buf };
+    }
+
+    pub fn deinit(self: *ObjectInterfaceMap, gpa: std.mem.Allocator) void {
+        gpa.free(self.client);
+        gpa.free(self.server);
+    }
+
+    pub fn add(
+        self: *ObjectInterfaceMap,
+        gpa: std.mem.Allocator,
+        id: u32,
+        interface: [:0]const u8,
+    ) !void {
+        const side = try getSide(id);
+        const idx = getIdx(id, side);
+        try self.ensureCapacity(gpa, idx, side);
+
+        const interfaces = switch (side) {
+            .client => self.client,
+            .server => self.server,
+        };
+
+        if (interfaces[idx] != null) {
+            @branchHint(.unlikely);
+            return error.ObjectAlreadyExists;
+        }
+        interfaces[idx] = interface;
+    }
+
+    pub fn del(self: *ObjectInterfaceMap, id: u32) !void {
+        const side = try getSide(id);
+        const idx = getIdx(id, side);
+        var interfaces = switch (side) {
+            .client => self.client,
+            .server => self.server,
+        };
+
+        if (idx >= interfaces.len or interfaces[idx] == null) {
+            @branchHint(.unlikely);
+            log.err("Delete object: invalid object id: {d}.", .{id});
+            return error.InvalidObject;
+        }
+        interfaces[idx] = null;
+    }
+
+    pub fn getInterface(self: *ObjectInterfaceMap, id: u32) ![:0]const u8 {
+        const side = try getSide(id);
+        const idx = getIdx(id, side);
+        const interfaces = switch (side) {
+            .client => self.client,
+            .server => self.server,
+        };
+        return interfaces[idx] orelse error.InvalidID;
+    }
+
+    fn getSide(id: u32) !ProtocolSide {
+        return switch (id) {
+            1, wire.client_min_id...wire.client_max_id => .client,
+            wire.server_min_id...wire.server_max_id => .server,
+            else => error.InvalidID,
+        };
+    }
+
+    fn getIdx(id: u32, side: ProtocolSide) usize {
+        return switch (side) {
+            .client => id - 1,
+            .server => id - wire.server_min_id,
+        };
+    }
+
+    fn ensureCapacity(
+        self: *ObjectInterfaceMap,
+        gpa: std.mem.Allocator,
+        idx: usize,
+        side: ProtocolSide,
+    ) error{ InvalidObject, OutOfMemory }!void {
+        var interfaces = switch (side) {
+            .client => self.client,
+            .server => self.server,
+        };
+
+        if (idx > interfaces.len) return error.InvalidObject;
+
+        if (idx == interfaces.len) {
+            const new_capacity = interfaces.len * 2;
+            const new_memory = gpa.remap(interfaces, new_capacity) orelse mem: {
+                const new_memory = try gpa.alloc(?[:0]const u8, new_capacity);
+                @memcpy(new_memory[0..interfaces.len], interfaces);
+                gpa.free(interfaces);
+                break :mem new_memory;
+            };
+
+            interfaces.ptr = new_memory.ptr;
+            const old_len = interfaces.len;
+            interfaces.len = new_memory.len;
+            for (old_len..interfaces.len) |i|
+                interfaces[i] = null;
+        }
+    }
+};

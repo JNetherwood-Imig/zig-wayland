@@ -1,5 +1,3 @@
-//! Private utility module for working with socket control messages.
-
 const std = @import("std");
 const alignment: usize = @sizeOf(usize);
 
@@ -10,32 +8,44 @@ pub const Header = extern struct {
 
 };
 
-/// Returns `size` rounded up to `@sizeOf(usize)` bytes.
 pub inline fn @"align"(size: usize) usize {
     return size + alignment - 1 & ~(alignment - 1);
 }
 
-/// Returns the length of the cmsg buffer which stores `count` fds.
+pub inline fn padding(size: usize) usize {
+    return (alignment - (size & (alignment - 1))) & (alignment - 1);
+}
+
 pub inline fn length(count: usize) usize {
-    return @"align"(@sizeOf(Header)) + count * @sizeOf(i32);
+    return @"align"(@sizeOf(Header)) + count * @sizeOf(std.posix.fd_t);
 }
 
-/// Returns the amount of space that should be given to a buffer which stores `count` fds.
 pub inline fn space(count: usize) usize {
-    return @"align"(@sizeOf(Header)) + @"align"(count * @sizeOf(i32));
+    return @"align"(@sizeOf(Header)) + @"align"(count * @sizeOf(std.posix.fd_t));
 }
 
-test "cmsg align" {
-    try std.testing.expectEqual(@"align"(15), 16);
-    try std.testing.expectEqual(@"align"(17), 24);
+pub inline fn firstHeader(message: *const std.posix.msghdr) ?*const Header {
+    return if (message.controllen >= @sizeOf(Header) and message.control != null)
+        @as(*const Header, @ptrCast(@alignCast(message.control.?)))
+    else
+        null;
 }
 
-test "cmsg len" {
-    try std.testing.expectEqual(20, length(1));
-    try std.testing.expectEqual(36, length(5));
+pub inline fn nextHeader(message: *const std.posix.msghdr, cmsg: *const Header) ?*const Header {
+    const control_ptr: [*]align(alignment) const u8 = @ptrCast(@alignCast(message.control.?));
+    const cmsg_ptr: [*]align(alignment) const u8 = @ptrCast(cmsg);
+    const size_needed = @sizeOf(Header) + padding(cmsg.len);
+
+    if (control_ptr + message.controllen - cmsg_ptr < size_needed or
+        control_ptr + message.controllen - cmsg_ptr - size_needed < cmsg.len)
+        return null;
+
+    return @as(*const Header, @ptrCast(@alignCast(cmsg_ptr + @"align"(cmsg.len))));
 }
 
-test "cmsg space" {
-    try std.testing.expectEqual(24, space(1));
-    try std.testing.expectEqual(40, space(5));
+pub inline fn data(cmsg: *const Header) []const u8 {
+    const many_ptr = @as([*]const Header, @ptrCast(cmsg));
+    const data_ptr = @as([*]const u8, @ptrCast(many_ptr + 1));
+    const len = cmsg.len - length(0);
+    return data_ptr[0..len];
 }
