@@ -12,7 +12,7 @@ pub fn main(init: std.process.Init) !void {
         std.log.err("Failed to connect to {f}: {t}.", .{ addr, err });
         return err;
     };
-    defer conn.deinit(io, gpa);
+    defer conn.deinit(gpa);
 
     const display: wl.Display = .display;
     _ = try display.getRegistry(&conn, gpa);

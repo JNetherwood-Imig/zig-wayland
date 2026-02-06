@@ -46,7 +46,7 @@ pub fn fromStream(
 ) !Connection {
     return Connection{
         .io = io,
-        .map = try .initUnbounded(gpa),
+        .map = try .init(gpa),
         .stream = stream,
         .next_id = switch (side) {
             .client => wire.client_min_id,
@@ -63,10 +63,10 @@ pub fn fromStream(
     };
 }
 
-pub fn deinit(self: *Connection, io: std.Io, gpa: std.mem.Allocator) void {
+pub fn deinit(self: *Connection, gpa: std.mem.Allocator) void {
     self.id_free_list.deinit(gpa);
     self.map.deinit(gpa);
-    self.stream.close(io);
+    self.stream.close(self.io);
     self.* = undefined;
 }
 
@@ -96,18 +96,11 @@ pub fn sendMessage(
     }
 }
 
-pub fn nextMessage(
-    self: *Connection,
-    comptime Message: type,
-    timeout: ?std.Io.Timeout,
-) !Message {
-    const deadline = if (timeout) |t| switch (t) {
-        .none, .deadline => t,
-        .duration => |dur| t: {
-            const now = try dur.clock.now(self.io);
-            break :t std.Io.Timeout{ .deadline = .{ .clock = dur.clock, .raw = now.addDuration(dur.raw) } };
-        },
-    } else std.Io.Timeout{ .duration = .{ .clock = .awake, .raw = .{ .nanoseconds = 0 } } };
+pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) !Message {
+    const deadline: ?std.Io.Clock.Timestamp = if (timeout) |t|
+        try t.toDeadline(self.io)
+    else
+        .{ .clock = .awake, .raw = .zero };
 
     self.flush() catch |err| switch (err) {
         error.SocketUnconnected => {},
@@ -163,6 +156,8 @@ pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) !void {
 }
 
 fn flush(self: *Connection) !void {
+    if (self.data_out.end == 0) return;
+
     const data = self.data_out.data[self.data_out.start..self.data_out.end];
     var iov = [1]std.posix.iovec_const{.{ .base = data.ptr, .len = data.len }};
 
@@ -205,15 +200,14 @@ fn peekHeader(self: *const Connection) ?wire.Header {
     return std.mem.bytesToValue(wire.Header, bytes);
 }
 
-fn readIncoming(self: *Connection, timeout: std.Io.Timeout) !void {
+fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
     self.data_in.shiftToStart();
     self.fd_in.shiftToStart();
 
-    const timeout_ms: i32 = switch (timeout) {
-        .deadline => |d| @intCast(d.raw.toMilliseconds()),
-        .none => -1,
-        else => unreachable,
-    };
+    const timeout_ms: i32 = if (deadline) |d| ms: {
+        const remaining = try d.durationFromNow(self.io);
+        break :ms @intCast(remaining.raw.toMilliseconds());
+    } else -1;
 
     var pfds = [1]std.posix.pollfd{.{
         .fd = self.stream.socket.handle,
@@ -246,6 +240,9 @@ fn readIncoming(self: *Connection, timeout: std.Io.Timeout) !void {
         .PIPE => return error.SocketUnconnected,
         else => |err| return std.posix.unexpectedErrno(err),
     }
+
+    if (rc == 0) return error.ConnectionClosed;
+
     self.data_in.end += rc;
 
     var header = cmsg.firstHeader(&msg);

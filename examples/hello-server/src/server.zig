@@ -1,43 +1,34 @@
 const std = @import("std");
+
 const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
-const Allocator = std.mem.Allocator;
+
 const log = std.log.scoped(.server);
 
-const Request = wayland.MessageUnion(.{wl});
-const RequestHandler = wayland.MessageHandler(Request);
+const Request = wayland.Message(.{wl});
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    const gpa = init.gpa;
 
-    var sock_info: wayland.SocketInfo = .auto;
-    var server = sock_info.listen(init, io) catch |err| {
-        log.err("Failed to create {f}.", .{sock_info});
-        return err;
-    };
+    var server = try wayland.Server.init(init, io);
     defer server.deinit(io);
 
-    log.info("Server running on {f}.", .{sock_info});
+    log.info("Server running on {s}.", .{server.socketPath()});
 
-    var conn = try server.accept(io);
-    defer conn.deinit(io);
+    var conn = try server.accept(io, gpa);
+    defer conn.deinit(gpa);
     log.info("Got connection!", .{});
 
-    var client_interface_buf: [32]?[:0]const u8 = @splat(null);
-    var handler = RequestHandler.initBuffered(&client_interface_buf, &.{});
-
-    const disp: wl.Display = .display;
-    try handler.addObjectBounded(disp);
-
-    while (handler.waitNextMessage(io, &conn, .none)) |req| switch (req) {
-        .wl_display => |disp_req| switch (disp_req) {
+    while (conn.nextMessage(Request, .none)) |request| switch (request) {
+        .wl_display => |req| switch (req) {
             .get_registry => |get_reg| {
                 log.debug("Received get registry (id = {d}).", .{get_reg.registry});
                 log.warn("Registry is not implemented.", .{});
             },
             .sync => |sync| {
                 const cb = sync.callback;
-                try cb.done(io, &conn, 0);
+                try cb.done(&conn, 0);
             },
         },
         else => |r| log.debug("Received {any}.", .{r}),

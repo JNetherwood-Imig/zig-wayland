@@ -1,43 +1,31 @@
 const std = @import("std");
+
 const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
-const Event = wayland.MessageUnion(.{wl});
-const EventHandler = wayland.MessageHandler(Event);
+
+const Event = wayland.Message(.{wl});
 const log = std.log.scoped(.client);
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    const gpa = init.gpa;
 
-    var id_buf: [8]u32 = undefined;
-    var ida = wayland.IdAllocator.initBounded(.client, &id_buf);
-
-    var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect(init, io);
-    defer conn.deinit(io);
-
-    var client_interface_buf: [64]?[:0]const u8 = @splat(null);
-    var handler = EventHandler.initBuffered(&client_interface_buf, &.{});
+    const addr = try wayland.Address.default(init);
+    var conn = try wayland.Connection.init(io, gpa, addr);
+    defer conn.deinit(gpa);
 
     const disp: wl.Display = .display;
-    try handler.addObjectBounded(disp);
+    _ = try disp.getRegistry(&conn, gpa);
+    _ = try disp.sync(&conn, gpa);
 
-    const reg = try disp.getRegistry(io, &conn, &ida);
-    try handler.addObjectBounded(reg);
-
-    const sync = try disp.sync(io, &conn, &ida);
-    try handler.addObjectBounded(sync);
-
-    while (handler.waitNextMessage(io, &conn, .none)) |msg| switch (msg) {
+    while (conn.nextMessage(Event, .none)) |msg| switch (msg) {
         .wl_registry => |ev| try handleRegistryEvent(ev),
         .wl_callback => |ev| {
             log.info("Got callback done with data {d}.", .{ev.done.callback_data});
             break;
         },
         .wl_display => |ev| switch (ev) {
-            .delete_id => |id| {
-                try ida.freeBounded(id.id);
-                try handler.delObject(id.id);
-            },
+            .delete_id => |id| try conn.releaseObject(gpa, id.id),
             .@"error" => return error.ProtocolError,
         },
         else => unreachable,
@@ -46,15 +34,11 @@ pub fn main(init: std.process.Init) !void {
 
 fn handleRegistryEvent(ev: @FieldType(Event, "wl_registry")) !void {
     switch (ev) {
-        .global => |glob| {
-            log.info("Global: {d}: {s} (version {d}).", .{
-                glob.name,
-                glob.interface,
-                glob.version,
-            });
-        },
-        .global_remove => |glob| {
-            log.info("Removed global: {d}.", .{glob.name});
-        },
+        .global => |glob| log.info("Global: {d}: {s} (version {d}).", .{
+            glob.name,
+            glob.interface,
+            glob.version,
+        }),
+        .global_remove => |glob| log.info("Removed global: {d}.", .{glob.name}),
     }
 }
