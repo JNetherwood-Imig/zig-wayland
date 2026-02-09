@@ -80,19 +80,21 @@ pub fn sendMessage(
 ) !void {
     var buf: [len]u8 = undefined;
     const serialized = try wire.serializeMessage(&buf, sender_id, opcode, args);
-    const res1 = self.data_out.put(buf[0..serialized]);
-    const res2 = self.fd_out.put(fds);
-
+    const res1 = self.data_out.putMany(buf[0..serialized]);
+    const res2 = self.putFds(fds);
     if (res1) |_| {} else |_| {
         @branchHint(.unlikely);
         try self.flush();
-        try self.data_out.put(buf[0..serialized]);
+        try self.data_out.putMany(buf[0..serialized]);
     }
 
-    if (res2) |_| {} else |_| {
-        @branchHint(.unlikely);
-        try self.flush();
-        try self.fd_out.put(fds);
+    if (res2) |_| {} else |err| switch (err) {
+        error.OutOfSpace => {
+            @branchHint(.unlikely);
+            try self.flush();
+            try self.putFds(fds);
+        },
+        else => |e| return e,
     }
 }
 
@@ -153,9 +155,10 @@ pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) !void {
         self.next_id -= 1
     else
         try self.id_free_list.append(gpa, id);
+    try self.map.del(id);
 }
 
-fn flush(self: *Connection) !void {
+pub fn flush(self: *Connection) !void {
     if (self.data_out.end == 0) return;
 
     const data = self.data_out.data[self.data_out.start..self.data_out.end];
@@ -178,7 +181,7 @@ fn flush(self: *Connection) !void {
         .iov = &iov,
         .iovlen = iov.len,
         .control = &control,
-        .controllen = cmsg.length(fds.len),
+        .controllen = @intCast(cmsg.length(fds.len)),
         .flags = 0,
     };
 
@@ -189,10 +192,25 @@ fn flush(self: *Connection) !void {
         else => |err| return std.posix.unexpectedErrno(err),
     }
 
+    for (fds) |fd| _ = std.posix.system.close(fd);
     self.data_out.start = 0;
     self.data_out.end = 0;
     self.fd_out.start = 0;
     self.fd_out.end = 0;
+}
+
+fn putFds(self: *Connection, fds: []const std.posix.fd_t) !void {
+    if (self.fd_out.end + fds.len >= self.fd_out.data.len)
+        return error.OutOfSpace;
+
+    for (fds) |fd| {
+        const rc = std.posix.system.dup(fd);
+        const dup: std.posix.fd_t = switch (std.posix.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            else => |err| return std.posix.unexpectedErrno(err),
+        };
+        self.fd_out.put(dup) catch unreachable;
+    }
 }
 
 fn peekHeader(self: *const Connection) ?wire.Header {
@@ -206,7 +224,7 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
 
     const timeout_ms: i32 = if (deadline) |d| ms: {
         const remaining = try d.durationFromNow(self.io);
-        break :ms @intCast(remaining.raw.toMilliseconds());
+        break :ms if (remaining.raw.nanoseconds <= 0) 0 else @intCast(remaining.raw.toMilliseconds());
     } else -1;
 
     var pfds = [1]std.posix.pollfd{.{
@@ -243,13 +261,13 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
 
     if (rc == 0) return error.ConnectionClosed;
 
-    self.data_in.end += rc;
+    self.data_in.end += @intCast(rc);
 
     var header = cmsg.firstHeader(&msg);
     while (header) |head| {
         const fd_bytes: []align(@alignOf(std.posix.fd_t)) const u8 = @alignCast(cmsg.data(head));
         const fds = std.mem.bytesAsSlice(std.posix.fd_t, fd_bytes);
-        try self.fd_in.put(fds);
+        try self.fd_in.putMany(fds);
         header = cmsg.nextHeader(&msg, head);
     }
 }
@@ -321,7 +339,14 @@ fn Buffer(comptime length: usize, comptime T: type) type {
         start: usize = 0,
         end: usize = 0,
 
-        pub fn put(self: *Self, data: []const T) !void {
+        pub fn put(self: *Self, item: T) !void {
+            if (self.end + 1 >= self.data.len)
+                return error.OutOfSpace;
+            self.data[self.end] = item;
+            self.end += 1;
+        }
+
+        pub fn putMany(self: *Self, data: []const T) !void {
             if (self.end + data.len >= self.data.len)
                 return error.OutOfSpace;
             @memcpy(self.data[self.end..][0..data.len], data);

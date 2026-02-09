@@ -81,6 +81,9 @@ pub fn deinit(self: *Server, io: std.Io) void {
 
     std.Io.Dir.deleteFileAbsolute(io, path) catch {};
     std.Io.Dir.deleteFileAbsolute(io, lock_path) catch {};
+
+    self.lock.close(io);
+    self.inner.socket.close(io);
 }
 
 pub fn socketPath(self: *const Server) []const u8 {
