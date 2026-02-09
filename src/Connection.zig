@@ -66,6 +66,8 @@ pub fn fromStream(
 }
 
 pub fn deinit(self: *Connection, gpa: std.mem.Allocator) void {
+    for (self.fd_out.slice()) |fd| _ = std.posix.system.close(fd);
+    for (self.fd_in.slice()) |fd| _ = std.posix.system.close(fd);
     self.id_free_list.deinit(gpa);
     self.map.deinit(gpa);
     self.stream.close(self.io);
@@ -90,6 +92,7 @@ pub fn sendMessage(
     const serialized = try wire.serializeMessage(&buf, sender_id, opcode, args);
     const res1 = self.data_out.putMany(buf[0..serialized]);
     const res2 = self.putFds(fds);
+
     if (res1) |_| {} else |_| {
         @branchHint(.unlikely);
         try self.flush();
@@ -238,6 +241,7 @@ pub fn flush(self: *Connection) FlushError!void {
     if (sent == 0) return error.ConnectionClosed;
 
     for (fds) |fd| std.posix.close(fd);
+
     self.data_out.start = 0;
     self.data_out.end = 0;
     self.fd_out.start = 0;
