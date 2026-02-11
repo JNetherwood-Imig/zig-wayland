@@ -180,7 +180,7 @@ fn emitNormal(
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) !void {\n");
+    try writer.writeAll("\t) core.Connection.SendError!void {\n");
 
     try writer.writeAll("\t\ttry connection.sendMessage(\n");
     try writer.writeAll("\t\t\tself.getId(),\n");
@@ -226,7 +226,10 @@ fn emitConstructor(
     try writer.writeAll("\t\tgpa: std.mem.Allocator,\n");
     for (self.args) |arg| if (arg.type != .new_id) try arg.write(gpa, writer, map);
 
-    try writer.print("\t) !{s}.{s} {{\n", .{ entry.protocol, entry.type_name });
+    try writer.print(
+        "\t) (core.Connection.SendError || core.Connection.CreateObjectError)!{s}.{s} {{\n",
+        .{ entry.protocol, entry.type_name },
+    );
 
     try writer.print("\t\tconst {s}_ = try connection.createObject({s}.{s}, gpa);\n", .{
         return_arg.name,
@@ -276,7 +279,7 @@ fn emitGenericConstructor(
     try writer.writeAll("\t\tversion: T.Version,\n");
     for (self.args) |arg| if (arg.type != .any_new_id)
         try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) !T {\n");
+    try writer.writeAll("\t) (core.Connection.SendError || core.Connection.CreateObjectError)!T {\n");
 
     try writer.writeAll("\t\tconst new_id = try connection.createObject(T, gpa);\n");
 

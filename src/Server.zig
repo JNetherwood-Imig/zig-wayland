@@ -13,7 +13,17 @@ inner: std.Io.net.Server,
 lock: std.Io.File,
 path: [std.Io.net.UnixAddress.max_len:0]u8,
 
-pub fn init(args: std.process.Init, io: std.Io) !Server {
+pub const InitError = LockDisplayError ||
+    std.Io.Dir.OpenError ||
+    std.Io.net.UnixAddress.ListenError ||
+    error{
+        NoXdgRuntimeDir,
+        NoDisplaysAvailable,
+        NameTooLong,
+        NoSpaceLeft,
+    };
+
+pub fn init(args: std.process.Init, io: std.Io) InitError!Server {
     const xdg_runtime_dir_path = args.environ_map.get("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
 
@@ -48,6 +58,38 @@ pub fn init(args: std.process.Init, io: std.Io) !Server {
     return self;
 }
 
+pub fn deinit(self: *Server, io: std.Io) void {
+    const path = std.mem.sliceTo(&self.path, 0);
+    var lock_buf: [std.Io.net.UnixAddress.max_len]u8 = undefined;
+    const lock_path = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{path}) catch unreachable;
+
+    std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+    std.Io.Dir.deleteFileAbsolute(io, lock_path) catch {};
+
+    self.lock.close(io);
+    self.inner.socket.close(io);
+}
+
+pub inline fn getFd(self: *const Server) std.posix.fd_t {
+    return self.inner.socket.handle;
+}
+
+pub inline fn socketPath(self: *const Server) []const u8 {
+    return std.mem.sliceTo(&self.path, 0);
+}
+
+pub const AcceptError = std.Io.net.Server.AcceptError || error{OutOfMemory};
+
+pub fn accept(self: *Server, io: std.Io, gpa: std.mem.Allocator) AcceptError!Connection {
+    const stream = try self.inner.accept(io);
+    return Connection.fromStream(io, gpa, stream, .server);
+}
+
+const LockDisplayError = std.Io.File.OpenError ||
+    std.Io.File.LockError ||
+    std.Io.File.StatError ||
+    error{LockFailed};
+
 fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint: []const u8) !std.Io.File {
     var lock_buf: [15]u8 = undefined;
     const lock = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{endpoint}) catch unreachable;
@@ -72,25 +114,4 @@ fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint: []const u8) !s
     }
 
     return lock_file;
-}
-
-pub fn deinit(self: *Server, io: std.Io) void {
-    const path = std.mem.sliceTo(&self.path, 0);
-    var lock_buf: [std.Io.net.UnixAddress.max_len]u8 = undefined;
-    const lock_path = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{path}) catch unreachable;
-
-    std.Io.Dir.deleteFileAbsolute(io, path) catch {};
-    std.Io.Dir.deleteFileAbsolute(io, lock_path) catch {};
-
-    self.lock.close(io);
-    self.inner.socket.close(io);
-}
-
-pub fn socketPath(self: *const Server) []const u8 {
-    return std.mem.sliceTo(&self.path, 0);
-}
-
-pub fn accept(self: *Server, io: std.Io, gpa: std.mem.Allocator) !Connection {
-    const stream = try self.inner.accept(io);
-    return Connection.fromStream(io, gpa, stream, .server);
 }

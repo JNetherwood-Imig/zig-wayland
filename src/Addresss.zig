@@ -8,7 +8,9 @@ info: union(enum) {
     path: [std.Io.net.UnixAddress.max_len:0]u8,
 },
 
-pub fn default(init: std.process.Init) !Address {
+pub const Error = error{ NoXdgRuntimeDir, PathTooLong };
+
+pub fn default(init: std.process.Init) Error!Address {
     if (init.environ_map.get("WAYLAND_SOCKET")) |sock_str| {
         if (std.fmt.parseInt(std.posix.fd_t, sock_str, 10)) |sock|
             return .initSocketFd(sock)
@@ -27,7 +29,7 @@ pub fn initSocketFd(sock: std.posix.fd_t) Address {
     };
 }
 
-pub fn initEndpoint(init: std.process.Init, endpoint: []const u8) !Address {
+pub fn initEndpoint(init: std.process.Init, endpoint: []const u8) Error!Address {
     const xdg_runtime_dir = init.environ_map.get("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
     var self = Address{
@@ -39,7 +41,7 @@ pub fn initEndpoint(init: std.process.Init, endpoint: []const u8) !Address {
     return self;
 }
 
-pub fn initAbsolutePath(path: []const u8) !Address {
+pub fn initAbsolutePath(path: []const u8) Error!Address {
     if (path.len > std.Io.net.UnixAddress.max_len) return error.PathTooLong;
     var self = Address{
         .strategy = .path,
@@ -49,7 +51,7 @@ pub fn initAbsolutePath(path: []const u8) !Address {
     return self;
 }
 
-pub fn format(self: Address, w: *std.Io.Writer) !void {
+pub fn format(self: Address, w: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (self.strategy) {
         .sock => try w.print("socket fd '{d}'", .{self.info.sock}),
         .name => {

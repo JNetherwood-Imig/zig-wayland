@@ -1,12 +1,12 @@
 const std = @import("std");
+const sys = std.posix.system;
 
-const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
 const Address = @import("Addresss.zig");
-const wire = @import("wire.zig");
 const cmsg = @import("cmsg.zig");
+const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
+const wire = @import("wire.zig");
 
 const log = std.log.scoped(.wayland_connection);
-
 const Connection = @This();
 
 stream: std.Io.net.Stream,
@@ -23,6 +23,8 @@ next_id: u32 = wire.client_min_id,
 id_free_list: std.ArrayList(u32) = .empty,
 min_id: u32 = wire.client_min_id,
 max_id: u32 = wire.client_max_id,
+
+pub const InitError = std.Io.net.UnixAddress.ConnectError || error{OutOfMemory};
 
 pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
     var map: ObjectInterfaceMap = try .init(gpa);
@@ -43,7 +45,7 @@ pub fn fromStream(
     gpa: std.mem.Allocator,
     stream: std.Io.net.Stream,
     side: ProtocolSide,
-) !Connection {
+) error{OutOfMemory}!Connection {
     return Connection{
         .io = io,
         .map = try .init(gpa),
@@ -70,6 +72,12 @@ pub fn deinit(self: *Connection, gpa: std.mem.Allocator) void {
     self.* = undefined;
 }
 
+pub inline fn getFd(self: *const Connection) std.posix.fd_t {
+    return self.stream.socket.handle;
+}
+
+pub const SendError = wire.SerializeError || FlushError || PutFdsError;
+
 pub fn sendMessage(
     self: *Connection,
     sender_id: u32,
@@ -77,7 +85,7 @@ pub fn sendMessage(
     comptime opcode: u16,
     args: anytype,
     fds: []const std.posix.fd_t,
-) !void {
+) SendError!void {
     var buf: [len]u8 = undefined;
     const serialized = try wire.serializeMessage(&buf, sender_id, opcode, args);
     const res1 = self.data_out.putMany(buf[0..serialized]);
@@ -98,16 +106,18 @@ pub fn sendMessage(
     }
 }
 
-pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) !Message {
+pub const NextMessageError = FlushError ||
+    ReadIncomingError ||
+    DeserializeMessageError ||
+    error{ MessageTooLong, InvalidID };
+
+pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) NextMessageError!Message {
     const deadline: ?std.Io.Clock.Timestamp = if (timeout) |t|
-        try t.toDeadline(self.io)
+        t.toDeadline(self.io) catch .{ .clock = .awake, .raw = .zero }
     else
         .{ .clock = .awake, .raw = .zero };
 
-    self.flush() catch |err| switch (err) {
-        error.SocketUnconnected => {},
-        else => |e| return e,
-    };
+    try self.flush();
 
     outer: while (true) {
         const header = self.peekHeader() orelse {
@@ -132,7 +142,9 @@ pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.T
     }
 }
 
-pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator) !T {
+pub const CreateObjectError = error{ OutOfMemory, OutOfIds, InvalidID, ObjectAlreadyExists };
+
+pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator) CreateObjectError!T {
     const id = id: {
         if (self.id_free_list.pop()) |id| break :id id;
 
@@ -150,7 +162,9 @@ pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator)
     return @enumFromInt(id);
 }
 
-pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) !void {
+pub const ReleaseObjectError = error{ OutOfMemory, InvalidID };
+
+pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) ReleaseObjectError!void {
     if (id == self.next_id - 1)
         self.next_id -= 1
     else
@@ -158,13 +172,15 @@ pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) !void {
     try self.map.del(id);
 }
 
-pub fn flush(self: *Connection) !void {
+pub const FlushError = error{ ConnectionClosed, OutOfMemory, Unexpected };
+
+pub fn flush(self: *Connection) FlushError!void {
     if (self.data_out.end == 0) return;
 
-    const data = self.data_out.data[self.data_out.start..self.data_out.end];
+    const data = self.data_out.slice();
     var iov = [1]std.posix.iovec_const{.{ .base = data.ptr, .len = data.len }};
 
-    const fds = self.fd_out.data[self.fd_out.start..self.fd_out.end];
+    const fds = self.fd_out.slice();
     var control: [cmsg.space(wire.libwayland_max_message_args)]u8 = undefined;
     std.mem.bytesAsValue(cmsg.Header, control[0..@sizeOf(cmsg.Header)]).* = .{
         .len = cmsg.length(fds.len),
@@ -185,26 +201,57 @@ pub fn flush(self: *Connection) !void {
         .flags = 0,
     };
 
-    const rc = std.posix.system.sendmsg(self.stream.socket.handle, &msg, 0);
-    switch (std.posix.errno(rc)) {
-        .SUCCESS => {},
-        .PIPE => return error.SocketUnconnected,
-        else => |err| return std.posix.unexpectedErrno(err),
-    }
+    const sent: usize = while (true) {
+        const rc = sys.sendmsg(self.stream.socket.handle, &msg, 0);
+        switch (std.posix.errno(rc)) {
+            // We ignore EPIPE and ECONNRESET so as to not crash the application, allowing the user
+            // to gracefully handle being killed by the server.
+            .SUCCESS, .PIPE, .CONNRESET => break @intCast(rc),
 
-    for (fds) |fd| _ = std.posix.system.close(fd);
+            .NOBUFS, .NOMEM => return error.OutOfMemory,
+
+            .AGAIN => unreachable,
+            .AFNOSUPPORT => unreachable,
+            .BADF => unreachable,
+            .INTR => continue,
+            .INVAL => unreachable,
+            .MSGSIZE => unreachable,
+            .NOTCONN => unreachable,
+            .NOTSOCK => unreachable,
+            .OPNOTSUPP => unreachable,
+            .IO => unreachable,
+            .LOOP => unreachable,
+            .NAMETOOLONG => unreachable,
+            .NOENT => unreachable,
+            .NOTDIR => unreachable,
+            .ACCES => unreachable,
+            .DESTADDRREQ => unreachable,
+            .HOSTUNREACH => unreachable,
+            .ISCONN => unreachable,
+            .NETDOWN => unreachable,
+            .NETUNREACH => unreachable,
+
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    };
+
+    if (sent == 0) return error.ConnectionClosed;
+
+    for (fds) |fd| std.posix.close(fd);
     self.data_out.start = 0;
     self.data_out.end = 0;
     self.fd_out.start = 0;
     self.fd_out.end = 0;
 }
 
-fn putFds(self: *Connection, fds: []const std.posix.fd_t) !void {
+const PutFdsError = error{ OutOfSpace, Unexpected };
+
+fn putFds(self: *Connection, fds: []const std.posix.fd_t) PutFdsError!void {
     if (self.fd_out.end + fds.len >= self.fd_out.data.len)
         return error.OutOfSpace;
 
     for (fds) |fd| {
-        const rc = std.posix.system.dup(fd);
+        const rc = sys.dup(fd);
         const dup: std.posix.fd_t = switch (std.posix.errno(rc)) {
             .SUCCESS => @intCast(rc),
             else => |err| return std.posix.unexpectedErrno(err),
@@ -218,12 +265,15 @@ fn peekHeader(self: *const Connection) ?wire.Header {
     return std.mem.bytesToValue(wire.Header, bytes);
 }
 
-fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
+const ReadIncomingError = std.posix.PollError || error{ ConnectionClosed, Timeout, OutOfMemory, OutOfSpace };
+
+fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) ReadIncomingError!void {
     self.data_in.shiftToStart();
     self.fd_in.shiftToStart();
 
     const timeout_ms: i32 = if (deadline) |d| ms: {
-        const remaining = try d.durationFromNow(self.io);
+        const remaining = d.durationFromNow(self.io) catch
+            std.Io.Clock.Duration{ .clock = .awake, .raw = .zero };
         break :ms if (remaining.raw.nanoseconds <= 0) 0 else @intCast(remaining.raw.toMilliseconds());
     } else -1;
 
@@ -234,8 +284,7 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
     }};
 
     const count = try std.posix.poll(&pfds, timeout_ms);
-
-    if (count == 0) return error.TimedOut;
+    if (count == 0) return error.Timeout;
 
     const data = self.data_in.data[self.data_in.end..];
     var iov = [1]std.posix.iovec{.{ .base = data.ptr, .len = data.len }};
@@ -252,16 +301,32 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
         .flags = 0,
     };
 
-    const rc = std.posix.system.recvmsg(self.stream.socket.handle, &msg, std.posix.system.MSG.DONTWAIT);
-    switch (std.posix.errno(rc)) {
-        .SUCCESS => {},
-        .PIPE => return error.SocketUnconnected,
-        else => |err| return std.posix.unexpectedErrno(err),
-    }
+    const read: usize = while (true) {
+        const rc = sys.recvmsg(self.stream.socket.handle, &msg, sys.MSG.DONTWAIT);
+        switch (std.posix.errno(rc)) {
+            .SUCCESS => break @intCast(rc),
 
-    if (rc == 0) return error.ConnectionClosed;
+            .AGAIN => continue,
+            .INTR => continue,
 
-    self.data_in.end += @intCast(rc);
+            .CONNRESET, .PIPE => return error.ConnectionClosed,
+            .TIMEDOUT => return error.Timeout,
+            .NOBUFS, .NOMEM => return error.OutOfMemory,
+
+            .BADF => unreachable,
+            .INVAL => unreachable,
+            .MSGSIZE => unreachable,
+            .NOTCONN => unreachable,
+            .NOTSOCK => unreachable,
+            .OPNOTSUPP => unreachable,
+            .IO => unreachable,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    };
+
+    if (read == 0) return error.ConnectionClosed;
+
+    self.data_in.end += read;
 
     var header = cmsg.firstHeader(&msg);
     while (header) |head| {
@@ -272,13 +337,15 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) !void {
     }
 }
 
+const DeserializeMessageError = wire.DeserializeError || error{ UnsupportedInterface, InvalidOpcode };
+
 fn deserializeMessage(
     self: *Connection,
     comptime Message: type,
     header: wire.Header,
     interface: [:0]const u8,
     body: []const u8,
-) !?Message {
+) DeserializeMessageError!?Message {
     // This is arbitrary, but works for now.
     @setEvalBranchQuota(10000);
 
@@ -296,7 +363,6 @@ fn deserializeMessage(
                 self.fd_in.discard(fd_count) catch unreachable;
 
                 var message = try wire.deserializeMessage(sub_field.type, body, fds);
-
                 const object_self_field = std.meta.fields(@TypeOf(message))[0];
                 @field(message, object_self_field.name) = @enumFromInt(header.object);
 
@@ -307,7 +373,7 @@ fn deserializeMessage(
         }
     };
 
-    @panic("Interface not present in generated message union.");
+    return error.UnsupportedInterface;
 }
 
 fn countFds(comptime T: type) usize {
@@ -318,7 +384,7 @@ fn countFds(comptime T: type) usize {
     return count;
 }
 
-fn connectToAddress(io: std.Io, addr: Address) !std.Io.net.Stream {
+fn connectToAddress(io: std.Io, addr: Address) std.Io.net.UnixAddress.ConnectError!std.Io.net.Stream {
     return switch (addr.info) {
         .sock => |sock| std.Io.net.Stream{ .socket = .{
             .handle = sock,
@@ -339,14 +405,16 @@ fn Buffer(comptime length: usize, comptime T: type) type {
         start: usize = 0,
         end: usize = 0,
 
-        pub fn put(self: *Self, item: T) !void {
+        pub const PutError = error{OutOfSpace};
+
+        pub fn put(self: *Self, item: T) PutError!void {
             if (self.end + 1 >= self.data.len)
                 return error.OutOfSpace;
             self.data[self.end] = item;
             self.end += 1;
         }
 
-        pub fn putMany(self: *Self, data: []const T) !void {
+        pub fn putMany(self: *Self, data: []const T) PutError!void {
             if (self.end + data.len >= self.data.len)
                 return error.OutOfSpace;
             @memcpy(self.data[self.end..][0..data.len], data);
@@ -358,7 +426,9 @@ fn Buffer(comptime length: usize, comptime T: type) type {
             return self.data[self.start..][0..n];
         }
 
-        pub fn discard(self: *Self, n: usize) !void {
+        pub const DiscardError = error{DiscardTooLong};
+
+        pub fn discard(self: *Self, n: usize) DiscardError!void {
             if (n > self.end - self.start) return error.DiscardTooLong;
             self.start += n;
             if (self.start == self.end) {
@@ -374,6 +444,10 @@ fn Buffer(comptime length: usize, comptime T: type) type {
             self.start = 0;
             self.end = len;
         }
+
+        pub fn slice(self: *Self) []T {
+            return self.data[self.start..self.end];
+        }
     };
 }
 
@@ -381,7 +455,7 @@ const ObjectInterfaceMap = struct {
     client: []?[:0]const u8,
     server: []?[:0]const u8,
 
-    pub fn init(gpa: std.mem.Allocator) !ObjectInterfaceMap {
+    pub fn init(gpa: std.mem.Allocator) error{OutOfMemory}!ObjectInterfaceMap {
         var client_buf = try gpa.alloc(?[:0]const u8, 16);
         errdefer gpa.free(client_buf);
         @memset(client_buf, null);
@@ -402,7 +476,7 @@ const ObjectInterfaceMap = struct {
         gpa: std.mem.Allocator,
         id: u32,
         interface: [:0]const u8,
-    ) !void {
+    ) error{ OutOfMemory, InvalidID, ObjectAlreadyExists }!void {
         const side = try getSide(id);
         const idx = getIdx(id, side);
         try self.ensureCapacity(gpa, idx, side);
@@ -419,7 +493,7 @@ const ObjectInterfaceMap = struct {
         interfaces[idx] = interface;
     }
 
-    pub fn del(self: *ObjectInterfaceMap, id: u32) !void {
+    pub fn del(self: *ObjectInterfaceMap, id: u32) error{InvalidID}!void {
         const side = try getSide(id);
         const idx = getIdx(id, side);
         var interfaces = switch (side) {
@@ -430,12 +504,12 @@ const ObjectInterfaceMap = struct {
         if (idx >= interfaces.len or interfaces[idx] == null) {
             @branchHint(.unlikely);
             log.err("Delete object: invalid object id: {d}.", .{id});
-            return error.InvalidObject;
+            return error.InvalidID;
         }
         interfaces[idx] = null;
     }
 
-    pub fn getInterface(self: *ObjectInterfaceMap, id: u32) ![:0]const u8 {
+    pub fn getInterface(self: *ObjectInterfaceMap, id: u32) error{InvalidID}![:0]const u8 {
         const side = try getSide(id);
         const idx = getIdx(id, side);
         const interfaces = switch (side) {
@@ -445,7 +519,7 @@ const ObjectInterfaceMap = struct {
         return interfaces[idx] orelse error.InvalidID;
     }
 
-    fn getSide(id: u32) !ProtocolSide {
+    fn getSide(id: u32) error{InvalidID}!ProtocolSide {
         return switch (id) {
             1, wire.client_min_id...wire.client_max_id => .client,
             wire.server_min_id...wire.server_max_id => .server,
@@ -465,13 +539,13 @@ const ObjectInterfaceMap = struct {
         gpa: std.mem.Allocator,
         idx: usize,
         side: ProtocolSide,
-    ) error{ InvalidObject, OutOfMemory }!void {
+    ) error{ InvalidID, OutOfMemory }!void {
         var interfaces = switch (side) {
             .client => self.client,
             .server => self.server,
         };
 
-        if (idx > interfaces.len) return error.InvalidObject;
+        if (idx > interfaces.len) return error.InvalidID;
 
         if (idx == interfaces.len) {
             const new_capacity = interfaces.len * 2;
