@@ -2,16 +2,17 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const prelude = @embedFile("docs_prelude.txt");
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    var args = init.minimal.args.iterate();
     _ = args.skip();
 
     const output_path = args.next() orelse return error.ExpectedOutputPath;
-    const output_file = try std.fs.cwd().createFile(output_path, .{});
-    defer output_file.close();
+    const output_file = try std.Io.Dir.cwd().createFile(io, output_path, .{});
+    defer output_file.close(io);
 
     var buf: [4096]u8 = undefined;
-    var writer = output_file.writer(&buf);
+    var writer = output_file.writer(io, &buf);
     const w = &writer.interface;
 
     try emitPrelude(w);
