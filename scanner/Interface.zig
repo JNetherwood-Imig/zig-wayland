@@ -131,6 +131,9 @@ pub fn emitServerCode(
 ) !void {
     try self.emitCommon(writer, map);
 
+    const entry = try map.get(self.name);
+    for (self.enums.items) |en| if (std.mem.eql(u8, en.name, "error")) try emitPostError(writer, entry.type_name);
+
     for (self.requests, 0..) |request, opcode|
         try request.emitIncomingMessage(gpa, writer, map, self.name, opcode);
 
@@ -187,4 +190,17 @@ pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]c
     };
 
     return util.snakeToPascal(gpa, stripped_name);
+}
+
+fn emitPostError(w: *std.Io.Writer, tn: []const u8) !void {
+    try w.print("\tpub fn postError(self: {s},\n " ++
+        "\t\tconn: *core.Connection,\n" ++
+        "\t\tcode: Error,\n" ++
+        "\t\tcomptime fmt: []const u8,\n" ++
+        "\t\targs: anytype\n" ++
+        "\t) void {{\n", .{tn});
+    try w.writeAll("\t\tvar buf: [4096:0]u8 = undefined;\n");
+    try w.writeAll("\t\tconst msg = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch return;\n");
+    try w.writeAll("\t\twayland.Display.display.@\"error\"(conn, self.getId(), @intCast(@intFromEnum(code)), msg) catch {};\n");
+    try w.writeAll("\t}\n\n");
 }
