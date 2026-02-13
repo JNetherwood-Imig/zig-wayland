@@ -162,7 +162,7 @@ fn emitCommon(
     for (0..self.version) |v| try writer.print("\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
     try writer.writeAll("\t};\n\n");
     try writer.print(
-        "\tpub fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
+        "\tpub inline fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
         .{type_name},
     );
 }
