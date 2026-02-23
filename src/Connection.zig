@@ -24,6 +24,8 @@ id_free_list: std.ArrayList(u32) = .empty,
 min_id: u32 = wire.client_min_id,
 max_id: u32 = wire.client_max_id,
 
+last_header: ?wire.Header = null,
+
 pub const InitError = std.Io.net.UnixAddress.ConnectError || error{OutOfMemory};
 
 pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
@@ -131,17 +133,21 @@ pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.T
         if (header.length > wire.libwayland_max_message_size)
             return error.MessageTooLong;
 
-        const message = self.data_in.peek(header.length) orelse {
+        const data = self.data_in.peek(header.length) orelse {
             try self.readIncoming(deadline);
             continue :outer;
         };
-        const body = message[@sizeOf(wire.Header)..];
+        const body = data[@sizeOf(wire.Header)..];
 
         const interface = try self.map.getInterface(header.object);
-        return try self.deserializeMessage(Message, header, interface, body) orelse {
+        const message = try self.deserializeMessage(Message, header, interface, body) orelse {
             try self.readIncoming(deadline);
             continue :outer;
         };
+
+        self.last_header = header;
+
+        return message;
     }
 }
 
