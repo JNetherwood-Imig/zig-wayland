@@ -17,7 +17,7 @@ pub fn main(init: std.process.Init) !void {
     log.info("Server running on {s}.", .{server.socketPath()});
 
     var conn = try server.accept(io, gpa);
-    defer conn.deinit(gpa);
+    defer conn.deinit();
     log.info("Got connection!", .{});
 
     while (conn.nextMessage(Request, .none)) |request| switch (request) {

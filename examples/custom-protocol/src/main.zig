@@ -11,12 +11,12 @@ pub fn main(init: std.process.Init) !void {
     // Connecto to server
     const addr = try wayland.Address.default(init);
     var conn = try wayland.Connection.init(io, gpa, addr);
-    defer conn.deinit(gpa);
+    defer conn.deinit();
 
     const disp: wl.Display = .display;
-    const reg = try disp.getRegistry(&conn, gpa);
+    const reg = try disp.getRegistry(&conn);
 
-    _ = try disp.sync(&conn, gpa);
+    _ = try disp.sync(&conn);
 
     var comp: wl.Compositor = .invalid;
     var surface_mgr: hyprland.SurfaceManager = .invalid;
@@ -25,12 +25,12 @@ pub fn main(init: std.process.Init) !void {
         .wl_registry => |ev| switch (ev) {
             .global => |glob| {
                 if (std.mem.eql(u8, glob.interface, wl.Compositor.interface)) {
-                    comp = try reg.bind(&conn, gpa, wl.Compositor, .v6, glob.name);
+                    comp = try reg.bind(&conn, wl.Compositor, .v6, glob.name);
                     continue;
                 }
                 if (std.mem.eql(u8, glob.interface, hyprland.SurfaceManager.interface)) {
                     std.log.info("Found hyprland surface manager.", .{});
-                    surface_mgr = try reg.bind(&conn, gpa, hyprland.SurfaceManager, .v2, glob.name);
+                    surface_mgr = try reg.bind(&conn, hyprland.SurfaceManager, .v2, glob.name);
                     continue;
                 }
             },
@@ -49,8 +49,8 @@ pub fn main(init: std.process.Init) !void {
         return error.SurfaceManagerNotFound;
     }
 
-    const surface = try comp.createSurface(&conn, gpa);
-    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, gpa, surface);
+    const surface = try comp.createSurface(&conn);
+    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, surface);
 
     // We won't actually do anything now since this is just a brief demo for building
     // and using custom protocols.

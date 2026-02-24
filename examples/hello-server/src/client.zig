@@ -7,16 +7,13 @@ const Event = wayland.Message(.{wl});
 const log = std.log.scoped(.client);
 
 pub fn main(init: std.process.Init) !void {
-    const io = init.io;
-    const gpa = init.gpa;
-
     const addr = try wayland.Address.default(init);
-    var conn = try wayland.Connection.init(io, gpa, addr);
-    defer conn.deinit(gpa);
+    var conn = try wayland.Connection.init(init.io, init.gpa, addr);
+    defer conn.deinit();
 
     const disp: wl.Display = .display;
-    _ = try disp.getRegistry(&conn, gpa);
-    _ = try disp.sync(&conn, gpa);
+    _ = try disp.getRegistry(&conn);
+    _ = try disp.sync(&conn);
 
     while (conn.nextMessage(Event, .none)) |msg| switch (msg) {
         .wl_registry => |ev| try handleRegistryEvent(ev),
@@ -25,7 +22,7 @@ pub fn main(init: std.process.Init) !void {
             break;
         },
         .wl_display => |ev| switch (ev) {
-            .delete_id => |id| try conn.releaseObject(gpa, id.id),
+            .delete_id => |id| try conn.releaseObject(id.id),
             .@"error" => return error.ProtocolError,
         },
         else => unreachable,
