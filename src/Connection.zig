@@ -12,6 +12,7 @@ const Connection = @This();
 stream: std.Io.net.Stream,
 
 io: std.Io,
+gpa: std.mem.Allocator,
 map: ObjectInterfaceMap,
 
 data_in: Buffer(wire.libwayland_max_message_size, u8) = .{},
@@ -37,6 +38,7 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
     return Connection{
         .stream = stream,
         .io = io,
+        .gpa = gpa,
         .map = map,
     };
 }
@@ -50,6 +52,7 @@ pub fn fromStream(
 ) error{OutOfMemory}!Connection {
     return Connection{
         .io = io,
+        .gpa = gpa,
         .map = try .init(gpa),
         .stream = stream,
         .next_id = switch (side) {
@@ -67,11 +70,11 @@ pub fn fromStream(
     };
 }
 
-pub fn deinit(self: *Connection, gpa: std.mem.Allocator) void {
+pub fn deinit(self: *Connection) void {
     for (self.fd_out.slice()) |fd| _ = std.posix.system.close(fd);
     for (self.fd_in.slice()) |fd| _ = std.posix.system.close(fd);
-    self.id_free_list.deinit(gpa);
-    self.map.deinit(gpa);
+    self.id_free_list.deinit(self.gpa);
+    self.map.deinit(self.gpa);
     self.stream.close(self.io);
     self.* = undefined;
 }
@@ -153,7 +156,7 @@ pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.T
 
 pub const CreateObjectError = error{ OutOfMemory, OutOfIds, InvalidID, ObjectAlreadyExists };
 
-pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator) CreateObjectError!T {
+pub fn createObject(self: *Connection, comptime T: type) CreateObjectError!T {
     const id = id: {
         if (self.id_free_list.pop()) |id| break :id id;
 
@@ -166,18 +169,18 @@ pub fn createObject(self: *Connection, comptime T: type, gpa: std.mem.Allocator)
         break :id self.next_id;
     };
 
-    try self.map.add(gpa, id, T.interface);
+    try self.map.add(self.gpa, id, T.interface);
 
     return @enumFromInt(id);
 }
 
 pub const ReleaseObjectError = error{ OutOfMemory, InvalidID };
 
-pub fn releaseObject(self: *Connection, gpa: std.mem.Allocator, id: u32) ReleaseObjectError!void {
+pub fn releaseObject(self: *Connection, id: u32) ReleaseObjectError!void {
     if (id == self.next_id - 1)
         self.next_id -= 1
     else
-        try self.id_free_list.append(gpa, id);
+        try self.id_free_list.append(self.gpa, id);
     try self.map.del(id);
 }
 
