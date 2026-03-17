@@ -31,11 +31,11 @@ pub fn init(args: std.process.Init, io: std.Io) InitError!Server {
     defer xdg_runtime_dir.close(io);
 
     var endpoint_buf: [12]u8 = undefined;
-    var endpoint: []const u8 = undefined;
+    var endpoint_name: []const u8 = undefined;
 
     const lock: std.Io.File = for (0..max_displays) |display| {
-        endpoint = std.fmt.bufPrint(&endpoint_buf, "wayland-{}", .{display}) catch unreachable;
-        break lockDisplay(io, xdg_runtime_dir, endpoint) catch |err| switch (err) {
+        endpoint_name = std.fmt.bufPrint(&endpoint_buf, "wayland-{}", .{display}) catch unreachable;
+        break lockDisplay(io, xdg_runtime_dir, endpoint_name) catch |err| switch (err) {
             error.LockFailed => continue,
             else => |e| return e,
         };
@@ -43,7 +43,7 @@ pub fn init(args: std.process.Init, io: std.Io) InitError!Server {
     errdefer lock.close(io);
 
     var path_buf: [std.Io.net.UnixAddress.max_len]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ xdg_runtime_dir_path, endpoint });
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ xdg_runtime_dir_path, endpoint_name });
     const addr = try std.Io.net.UnixAddress.init(path);
 
     const server = try addr.listen(io, .{});
@@ -78,6 +78,12 @@ pub inline fn socketPath(self: *const Server) []const u8 {
     return std.mem.sliceTo(&self.path, 0);
 }
 
+pub inline fn endpoint(self: *const Server) []const u8 {
+    const path = self.socketPath();
+    const idx = if (std.mem.findScalarLast(u8, path, '/')) |idx| idx + 1 else 0;
+    return path[idx..];
+}
+
 pub const AcceptError = std.Io.net.Server.AcceptError || error{OutOfMemory};
 
 pub fn accept(self: *Server, io: std.Io, gpa: std.mem.Allocator) AcceptError!Connection {
@@ -90,9 +96,9 @@ const LockDisplayError = std.Io.File.OpenError ||
     std.Io.File.StatError ||
     error{LockFailed};
 
-fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint: []const u8) !std.Io.File {
+fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint_name: []const u8) !std.Io.File {
     var lock_buf: [15]u8 = undefined;
-    const lock = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{endpoint}) catch unreachable;
+    const lock = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{endpoint_name}) catch unreachable;
 
     const lock_file = try xdg_runtime_dir.createFile(io, lock, .{
         .read = true,
@@ -103,11 +109,11 @@ fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint: []const u8) !s
 
     if (!try lock_file.tryLock(io, .exclusive)) return error.LockFailed;
 
-    if (xdg_runtime_dir.statFile(io, endpoint, .{ .follow_symlinks = false })) |stat| {
+    if (xdg_runtime_dir.statFile(io, endpoint_name, .{ .follow_symlinks = false })) |stat| {
         const mode = stat.permissions.toMode();
         if (mode & S.IWUSR == S.IWUSR or
             mode & S.IWGRP == S.IWGRP)
-            xdg_runtime_dir.deleteFile(io, endpoint) catch {};
+            xdg_runtime_dir.deleteFile(io, endpoint_name) catch {};
     } else |err| switch (err) {
         error.FileNotFound => {},
         else => |e| return e,
