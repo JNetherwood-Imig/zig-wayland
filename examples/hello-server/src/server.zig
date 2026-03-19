@@ -9,9 +9,10 @@ const Request = wayland.Message(.{wl});
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    const env = init.environ_map;
     const gpa = init.gpa;
 
-    var server = try wayland.Server.init(init, io);
+    var server = try wayland.Server.init(io, env);
     defer server.deinit(io);
 
     log.info("Server running on {s}.", .{server.socketPath()});

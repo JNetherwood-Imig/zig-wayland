@@ -23,8 +23,8 @@ pub const InitError = LockDisplayError ||
         NoSpaceLeft,
     };
 
-pub fn init(args: std.process.Init, io: std.Io) InitError!Server {
-    const xdg_runtime_dir_path = args.environ_map.get("XDG_RUNTIME_DIR") orelse
+pub fn init(io: std.Io, env: *std.process.Environ.Map) InitError!Server {
+    const xdg_runtime_dir_path = env.get("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
 
     const xdg_runtime_dir = try std.Io.Dir.openDirAbsolute(io, xdg_runtime_dir_path, .{});
@@ -68,6 +68,8 @@ pub fn deinit(self: *Server, io: std.Io) void {
 
     self.lock.close(io);
     self.inner.socket.close(io);
+
+    self.* = undefined;
 }
 
 pub inline fn getFd(self: *const Server) std.posix.fd_t {
