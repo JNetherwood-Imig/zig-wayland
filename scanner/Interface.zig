@@ -160,6 +160,9 @@ fn emitCommon(
     try writer.print("\tpub const interface = \"{s}\";\n\n", .{self.name});
     try writer.writeAll("\tpub const Version = enum(u32) {\n");
     for (0..self.version) |v| try writer.print("\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
+    try writer.writeAll(
+        "\t\tpub inline fn toU32(self: Version) u32 {\n\t\t\treturn @intFromEnum(self);\n\t\t}\n",
+    );
     try writer.writeAll("\t};\n\n");
     try writer.print(
         "\tpub inline fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
