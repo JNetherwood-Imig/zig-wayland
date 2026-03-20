@@ -7,10 +7,10 @@ const log = std.log.scoped(.server);
 
 const Request = wayland.Message(.{wl});
 
-pub fn main(init: std.process.Init) !void {
-    const io = init.io;
-    const env = init.environ_map;
-    const gpa = init.gpa;
+pub fn main(args: std.process.Init) !void {
+    const io = args.io;
+    const env = args.environ_map;
+    const gpa = args.gpa;
 
     var server = try wayland.Server.init(io, env);
     defer server.deinit(io);

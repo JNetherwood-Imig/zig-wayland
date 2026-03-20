@@ -6,9 +6,13 @@ const wl = @import("wayland_protocol");
 const Event = wayland.Message(.{wl});
 const log = std.log.scoped(.client);
 
-pub fn main(init: std.process.Init) !void {
-    const addr = try wayland.Address.default(init);
-    var conn = try wayland.Connection.init(init.io, init.gpa, addr);
+pub fn main(args: std.process.Init) !void {
+    const io = args.io;
+    const env = args.environ_map;
+    const gpa = args.gpa;
+
+    const addr = try wayland.Address.default(env);
+    var conn = try wayland.Connection.init(io, gpa, addr);
     defer conn.deinit();
 
     const disp: wl.Display = .display;

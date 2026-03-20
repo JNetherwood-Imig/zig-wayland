@@ -4,12 +4,13 @@ const wl = @import("wayland_protocol");
 const hyprland = @import("hyprland_surface");
 const Event = wayland.Message(.{ wl, hyprland });
 
-pub fn main(init: std.process.Init) !void {
-    const gpa = init.gpa;
-    const io = init.io;
+pub fn main(args: std.process.Init) !void {
+    const io = args.io;
+    const env = args.environ_map;
+    const gpa = args.gpa;
 
     // Connecto to server
-    const addr = try wayland.Address.default(init);
+    const addr = try wayland.Address.default(env);
     var conn = try wayland.Connection.init(io, gpa, addr);
     defer conn.deinit();
 
