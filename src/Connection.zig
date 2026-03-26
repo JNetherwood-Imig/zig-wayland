@@ -25,10 +25,13 @@ id_free_list: std.ArrayList(u32) = .empty,
 min_id: u32 = wire.client_min_id,
 max_id: u32 = wire.client_max_id,
 
+/// Last message header which was received. Can be used for debugging purposes.
 last_header: ?wire.Header = null,
 
 pub const InitError = std.Io.net.UnixAddress.ConnectError || error{OutOfMemory};
 
+/// Creates a new `Connection` connected to `addr`.
+/// Stores `io` and `gpa` for internal use.
 pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
     var map: ObjectInterfaceMap = try .init(gpa);
     errdefer map.deinit(gpa);
@@ -43,7 +46,9 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
     };
 }
 
-/// Takes ownership of Stream.
+/// Creates a new `Connection` from `stream`
+/// Takes ownership of `stream`.
+/// Stores `io` and `gpa` for internal use.
 pub fn fromStream(
     io: std.Io,
     gpa: std.mem.Allocator,
@@ -70,6 +75,7 @@ pub fn fromStream(
     };
 }
 
+/// Deinitializes all internal resources.
 pub fn deinit(self: *Connection) void {
     for (self.fd_out.slice()) |fd| _ = std.posix.system.close(fd);
     for (self.fd_in.slice()) |fd| _ = std.posix.system.close(fd);
@@ -79,12 +85,15 @@ pub fn deinit(self: *Connection) void {
     self.* = undefined;
 }
 
+/// Convenience method for accessing stream handle.
 pub inline fn getFd(self: *const Connection) std.posix.fd_t {
     return self.stream.socket.handle;
 }
 
 pub const SendError = wire.SerializeError || FlushError || PutFdsError;
 
+/// INTERNAL USE ONLY
+/// Serializes and sends a message across the wire.
 pub fn sendMessage(
     self: *Connection,
     sender_id: u32,
@@ -119,6 +128,9 @@ pub const NextMessageError = FlushError ||
     DeserializeMessageError ||
     error{ MessageTooLong, InvalidID };
 
+/// Waits for the next available message and fills out a `Message` union.
+/// `timeout` can be `.none`, `.{ .duration = [duration] }`, `.{ .deadline = [deadline] }`,
+/// or `null` for instant timeout.
 pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) NextMessageError!Message {
     const deadline: ?std.Io.Clock.Timestamp = if (timeout) |t|
         t.toDeadline(self.io) catch .{ .clock = .awake, .raw = .zero }
@@ -156,6 +168,9 @@ pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.T
 
 pub const CreateObjectError = error{ OutOfMemory, OutOfIds, InvalidID, ObjectAlreadyExists };
 
+/// Allocates a new id by either popping from the free-list, or incrementing the value of `next_id`
+/// and returns a new `T`.
+/// The resulting object is addded to the internal object-interface map, which may cause an allocation.
 pub fn createObject(self: *Connection, comptime T: type) CreateObjectError!T {
     const id = id: {
         if (self.id_free_list.pop()) |id| break :id id;
@@ -176,12 +191,23 @@ pub fn createObject(self: *Connection, comptime T: type) CreateObjectError!T {
 
 pub const ReleaseObjectError = error{ OutOfMemory, InvalidID };
 
+/// Removes an object from the connection's internal object-interface map and either
+/// appends the free'd id to the free-list (may allocate) or decrements the `next_id` if possible.
 pub fn releaseObject(self: *Connection, id: u32) ReleaseObjectError!void {
     if (id == self.next_id - 1)
         self.next_id -= 1
     else
         try self.id_free_list.append(self.gpa, id);
     try self.map.del(id);
+}
+
+pub const RegisterObjectError = error{ OutOfMemory, InvalidID, ObjectAlreadyExists };
+
+/// Adds an externally created object (created by opposite end of wire)
+/// to the connection's internal object-interface map.
+/// `interface` should point to static memory, likely from codegen.
+pub inline fn registerObject(self: *Connection, id: u32, interface: [:0]const u8) RegisterObjectError!void {
+    try self.map.add(self.gpa, id, interface);
 }
 
 pub const FlushError = error{ ConnectionClosed, OutOfMemory, Unexpected };
@@ -350,7 +376,9 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) ReadIncomi
     }
 }
 
-const DeserializeMessageError = wire.DeserializeError || error{ UnsupportedInterface, InvalidOpcode };
+const DeserializeMessageError = wire.DeserializeError ||
+    RegisterObjectError ||
+    error{ UnsupportedInterface, InvalidOpcode };
 
 fn deserializeMessage(
     self: *Connection,
@@ -375,9 +403,10 @@ fn deserializeMessage(
                 self.data_in.discard(header.length) catch unreachable;
                 self.fd_in.discard(fd_count) catch unreachable;
 
-                var message = try wire.deserializeMessage(sub_field.type, body, fds);
-                const object_self_field = std.meta.fields(@TypeOf(message))[0];
-                @field(message, object_self_field.name) = @enumFromInt(header.object);
+                const InnerType = sub_field.type;
+                var message = try wire.deserializeMessage(InnerType, body, fds);
+                populateRecipientField(InnerType, &message, header);
+                try self.updateMap(InnerType, message);
 
                 const interface_message = @unionInit(field.type, sub_field.name, message);
                 return @unionInit(Message, field.name, interface_message);
@@ -395,6 +424,23 @@ fn countFds(comptime T: type) usize {
         count += 1;
     };
     return count;
+}
+
+fn populateRecipientField(comptime T: type, message: *T, header: wire.Header) void {
+    const field_name = @typeInfo(T).@"struct".fields[0].name;
+    @field(message, field_name) = @enumFromInt(header.object);
+}
+
+fn updateMap(self: *Connection, comptime T: type, message: T) !void {
+    const signature: []const u8 = T._signature;
+    if (signature.len == 0) return;
+    const fields = @typeInfo(T).@"struct".fields[1..];
+
+    inline for (signature, fields) |sig_byte, field| if (sig_byte == 'n') {
+        const id: u32 = @intFromEnum(@field(message, field.name));
+        const interface: [:0]const u8 = field.type.interface;
+        try self.registerObject(id, interface);
+    };
 }
 
 fn connectToAddress(io: std.Io, addr: Address) std.Io.net.UnixAddress.ConnectError!std.Io.net.Stream {
