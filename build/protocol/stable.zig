@@ -1,5 +1,5 @@
 //! Last updated to wayland-protocols version 1.47
-//! 23 December 2025
+//! 30 March 2026
 
 pub const linux_dmabuf_v1 = .{
     .subpath = "stable/linux-dmabuf/linux-dmabuf-v1.xml",

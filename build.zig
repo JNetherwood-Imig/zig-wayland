@@ -151,6 +151,7 @@ fn makeProtocolDeps(
     writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.stable);
     writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.staging);
     writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.unstable);
+    writeDepSet(b, dep_dir, scanner, wayland_protocols_dep, protocol.experimental);
     writeDepSet(b, dep_dir, scanner, wlr_protocols_dep, protocol.wlr);
     return dep_dir;
 }
@@ -173,6 +174,7 @@ fn makeProtocols(
         writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.stable, side);
         writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.staging, side);
         writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.unstable, side);
+        writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlp, protocol.experimental, side);
         writeCodeSet(b, target, optimize, core, test_step, doc_mod, scanner, dep_dir, wlr, protocol.wlr, side);
     }
 }
@@ -253,3 +255,48 @@ fn writeCodeSet(
         });
     }
 }
+
+// fn genWaylandProtocols() void {
+//     const definitions = @import("build/protocol2.zig");
+//     inline for (@typeInfo(definitions).@"struct".decls) |namespace| {
+//         const protocol_group = @field(definitions, namespace.name);
+//         const protocols = @typeInfo(@TypeOf(protocol_group)).@"struct".fields;
+//         inline for (protocols) |protocol_| {
+//             const name = protocol_.name;
+//             const data = @field(protocol_group, name);
+//             const versions: []const comptime_int = data.@"0";
+//             const dependencies: []const []const u8 = data.@"1" ++ [_][]const u8{"wayland"};
+
+//             if (versions.len == 0) {
+//                 const path = std.fmt.comptimePrint("{s}/{s}/{s}.xml", .{ namespace.name, name, name });
+//             } else inline for (versions) |version| {
+//                 const path = std.fmt.comptimePrint("{s}/{s}/{s}-v{d}.xml", .{ namespace.name, name, name, version });
+//             }
+//         }
+//     }
+// }
+
+// fn makeDep(
+//     b: *std.Build,
+//     scanner: *std.Build.Step.Compile,
+//     input_file: std.Build.LazyPath,
+//     prefix: []const u8,
+//     comptime output_name: []const u8,
+// ) void {
+//     const run = b.addRunArtifact(scanner);
+//     run.addFileArg(input_file);
+//     run.addArgs(&.{ "-p", prefix, "-o" });
+//     const output_file = run.addOutputFileArg(output_name ++ ".zig");
+//     b.addNamedLazyPath(output_name ++ "-dep", output_file);
+// }
+
+// fn makeCode(
+//     b: *std.Build,
+//     scanner: *std.Build.Step.Compile,
+//     input_file: std.Build.LazyPath,
+//     prefix: []const u8,
+//     comptime output_name: []const u8,
+//     comptime dependencies: []const []const u8,
+// ) void {
+
+//     }

@@ -514,15 +514,15 @@ const ObjectInterfaceMap = struct {
     client: []?[:0]const u8,
     server: []?[:0]const u8,
 
+    const initial_capacity = 16;
+
     pub fn init(gpa: std.mem.Allocator) error{OutOfMemory}!ObjectInterfaceMap {
-        var client_buf = try gpa.alloc(?[:0]const u8, 16);
+        var client_buf = try gpa.alloc(?[:0]const u8, initial_capacity);
         errdefer gpa.free(client_buf);
         @memset(client_buf, null);
         client_buf[0] = "wl_display";
 
-        const server_buf = try gpa.alloc(?[:0]const u8, 4);
-
-        return ObjectInterfaceMap{ .client = client_buf, .server = server_buf };
+        return ObjectInterfaceMap{ .client = client_buf, .server = &.{} };
     }
 
     pub fn deinit(self: *ObjectInterfaceMap, gpa: std.mem.Allocator) void {
@@ -607,7 +607,7 @@ const ObjectInterfaceMap = struct {
         if (idx > interfaces.len) return error.InvalidID;
 
         if (idx == interfaces.len) {
-            const new_capacity = interfaces.len * 2;
+            const new_capacity = if (interfaces.len == 0) initial_capacity else interfaces.len * 2;
             const new_memory = gpa.remap(interfaces, new_capacity) orelse mem: {
                 const new_memory = try gpa.alloc(?[:0]const u8, new_capacity);
                 @memcpy(new_memory[0..interfaces.len], interfaces);

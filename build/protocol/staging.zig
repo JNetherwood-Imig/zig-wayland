@@ -1,5 +1,5 @@
 //! Last updated to wayland-protocols version 1.47
-//! 23 December 2025
+//! 30 March 2026
 
 pub const alpha_modifier_v1 = .{
     .subpath = "staging/alpha-modifier/alpha-modifier-v1.xml",
@@ -147,6 +147,12 @@ pub const xdg_activation_v1 = .{
 
 pub const xdg_dialog_v1 = .{
     .subpath = "staging/xdg-dialog/xdg-dialog-v1.xml",
+    .strip_prefix = "xdg",
+    .imports = &.{ "wayland", "xdg_shell" },
+};
+
+pub const xdg_session_management_v1 = .{
+    .subpath = "staging/xdg-session-management/xdg-session-management-v1.xml",
     .strip_prefix = "xdg",
     .imports = &.{ "wayland", "xdg_shell" },
 };
