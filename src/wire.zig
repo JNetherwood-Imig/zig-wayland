@@ -10,7 +10,7 @@ const log = std.log.scoped(.wayland_wire);
 
 pub const libwayland_max_message_size = 4096;
 pub const libwayland_max_message_args = 20;
-pub const client_min_id = 0x00000002;
+pub const client_min_id = 0x00000001;
 pub const client_max_id = 0xfeffffff;
 pub const server_min_id = 0xff000000;
 pub const server_max_id = 0xfffffffe;

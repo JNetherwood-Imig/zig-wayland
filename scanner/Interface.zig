@@ -165,9 +165,16 @@ fn emitCommon(
     );
     try writer.writeAll("\t};\n\n");
     try writer.print(
-        "\tpub inline fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
+        "\tpub inline fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n\n",
         .{type_name},
     );
+    try writer.print("\tpub inline fn setUserData" ++
+        "(self: {s}, conn: *core.Connection, user_data: ?*anyopaque, " ++
+        "destructor: ?*const fn (*anyopaque, std.mem.Allocator) anyerror!void) error{{InvalidID}}!void {{" ++
+        "\n\t\ttry conn.setObjectUserData(self.getId(), user_data, destructor);\n\t}}\n\n", .{type_name});
+    try writer.print("\tpub inline fn getUserData" ++
+        "(self: {s}, conn: *core.Connection) error{{InvalidID}}!?*anyopaque {{" ++
+        "\n\t\treturn conn.getObjectUserData(self.getId());\n\t}}\n\n", .{type_name});
 }
 
 pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]const u8 {

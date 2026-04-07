@@ -13,17 +13,19 @@ stream: std.Io.net.Stream,
 
 io: std.Io,
 gpa: std.mem.Allocator,
-map: ObjectInterfaceMap,
+map: ObjectMap,
 
 data_in: Buffer(wire.libwayland_max_message_size, u8) = .{},
 data_out: Buffer(wire.libwayland_max_message_size, u8) = .{},
 fd_in: Buffer(wire.libwayland_max_message_args, std.posix.fd_t) = .{},
 fd_out: Buffer(wire.libwayland_max_message_args, std.posix.fd_t) = .{},
 
-next_id: u32 = wire.client_min_id,
+next_id: u32,
+min_id: u32,
+max_id: u32,
 id_free_list: std.ArrayList(u32) = .empty,
-min_id: u32 = wire.client_min_id,
-max_id: u32 = wire.client_max_id,
+
+next_serial: u32 = 0,
 
 /// Last message header which was received. Can be used for debugging purposes.
 last_header: ?wire.Header = null,
@@ -33,7 +35,7 @@ pub const InitError = std.Io.net.UnixAddress.ConnectError || error{OutOfMemory};
 /// Creates a new `Connection` connected to `addr`.
 /// Stores `io` and `gpa` for internal use.
 pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
-    var map: ObjectInterfaceMap = try .init(gpa);
+    var map: ObjectMap = try .init(gpa);
     errdefer map.deinit(gpa);
 
     const stream = try connectToAddress(io, addr);
@@ -43,6 +45,9 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
         .io = io,
         .gpa = gpa,
         .map = map,
+        .next_id = wire.client_min_id + 1,
+        .min_id = wire.client_min_id,
+        .max_id = wire.client_max_id,
     };
 }
 
@@ -61,7 +66,7 @@ pub fn fromStream(
         .map = try .init(gpa),
         .stream = stream,
         .next_id = switch (side) {
-            .client => wire.client_min_id,
+            .client => wire.client_min_id + 1,
             .server => wire.server_min_id,
         },
         .min_id = switch (side) {
@@ -88,6 +93,37 @@ pub fn deinit(self: *Connection) void {
 /// Convenience method for accessing stream handle.
 pub inline fn getFd(self: *const Connection) std.posix.fd_t {
     return self.stream.socket.handle;
+}
+
+pub fn nextSerial(self: *Connection) error{OutOfSerials}!u32 {
+    if (self.next_serial == std.math.maxInt(u32)) {
+        @branchHint(.cold);
+        return error.OutOfSerials;
+    }
+
+    defer self.next_serial += 1;
+    return self.next_serial;
+}
+
+pub fn setObjectUserData(
+    self: *Connection,
+    object: u32,
+    data: ?*anyopaque,
+    destructor: ?*const fn (*anyopaque, std.mem.Allocator) anyerror!void,
+) error{InvalidID}!void {
+    const entry = try self.map.getEntry(object);
+    entry.user_data = data;
+    entry.destroyUserDataCallback = destructor;
+}
+
+pub fn getObjectUserData(self: *Connection, object: u32) error{InvalidID}!?*anyopaque {
+    const entry = try self.map.getEntry(object);
+    return entry.user_data;
+}
+
+pub fn destroyObjectUserData(self: *const Connection, gpa: std.mem.Allocator, object: u32) anyerror!void {
+    const entry = try self.map.getEntry(object);
+    if (entry.user_data) |data| if (entry.destroyUserDataCallback) |destroyFn| try destroyFn(data, gpa);
 }
 
 pub const SendError = wire.SerializeError || FlushError || PutFdsError;
@@ -510,28 +546,40 @@ fn Buffer(comptime length: usize, comptime T: type) type {
     };
 }
 
-const ObjectInterfaceMap = struct {
-    client: []?[:0]const u8,
-    server: []?[:0]const u8,
+const ObjectMap = struct {
+    client: []?Entry,
+    server: []?Entry,
+
+    pub const Entry = struct {
+        interface: [:0]const u8,
+        user_data: ?*anyopaque = null,
+        destroyUserDataCallback: ?*const fn (*anyopaque, std.mem.Allocator) anyerror!void = null,
+
+        pub inline fn destroyUserData(self: Entry, gpa: std.mem.Allocator) anyerror!void {
+            if (self.user_data) |data| if (self.destroyUserDataCallback) |destructor| try destructor(data, gpa);
+        }
+    };
 
     const initial_capacity = 16;
 
-    pub fn init(gpa: std.mem.Allocator) error{OutOfMemory}!ObjectInterfaceMap {
-        var client_buf = try gpa.alloc(?[:0]const u8, initial_capacity);
+    pub fn init(gpa: std.mem.Allocator) error{OutOfMemory}!ObjectMap {
+        var client_buf = try gpa.alloc(?Entry, initial_capacity);
         errdefer gpa.free(client_buf);
         @memset(client_buf, null);
-        client_buf[0] = "wl_display";
+        client_buf[0] = .{ .interface = "wl_display" };
 
-        return ObjectInterfaceMap{ .client = client_buf, .server = &.{} };
+        return ObjectMap{ .client = client_buf, .server = &.{} };
     }
 
-    pub fn deinit(self: *ObjectInterfaceMap, gpa: std.mem.Allocator) void {
+    pub fn deinit(self: *ObjectMap, gpa: std.mem.Allocator) void {
+        for (self.client) |maybe_entry| if (maybe_entry) |entry| entry.destroyUserData(gpa) catch {};
+        for (self.server) |maybe_entry| if (maybe_entry) |entry| entry.destroyUserData(gpa) catch {};
         gpa.free(self.client);
         gpa.free(self.server);
     }
 
     pub fn add(
-        self: *ObjectInterfaceMap,
+        self: *ObjectMap,
         gpa: std.mem.Allocator,
         id: u32,
         interface: [:0]const u8,
@@ -540,47 +588,51 @@ const ObjectInterfaceMap = struct {
         const idx = getIdx(id, side);
         try self.ensureCapacity(gpa, idx, side);
 
-        const interfaces = switch (side) {
+        const entries = switch (side) {
             .client => self.client,
             .server => self.server,
         };
 
-        if (interfaces[idx] != null) {
+        if (entries[idx] != null) {
             @branchHint(.unlikely);
             return error.ObjectAlreadyExists;
         }
-        interfaces[idx] = interface;
+        entries[idx] = .{ .interface = interface };
     }
 
-    pub fn del(self: *ObjectInterfaceMap, id: u32) error{InvalidID}!void {
+    pub fn del(self: *ObjectMap, id: u32) error{InvalidID}!void {
         const side = try getSide(id);
         const idx = getIdx(id, side);
-        var interfaces = switch (side) {
+        var entries = switch (side) {
             .client => self.client,
             .server => self.server,
         };
 
-        if (idx >= interfaces.len or interfaces[idx] == null) {
+        if (idx >= entries.len or entries[idx] == null) {
             @branchHint(.unlikely);
             log.err("Delete object: invalid object id: {d}.", .{id});
             return error.InvalidID;
         }
-        interfaces[idx] = null;
+        entries[idx] = null;
     }
 
-    pub fn getInterface(self: *ObjectInterfaceMap, id: u32) error{InvalidID}![:0]const u8 {
+    pub fn getEntry(self: *ObjectMap, id: u32) error{InvalidID}!*Entry {
         const side = try getSide(id);
         const idx = getIdx(id, side);
-        const interfaces = switch (side) {
+        const entries = switch (side) {
             .client => self.client,
             .server => self.server,
         };
-        return interfaces[idx] orelse error.InvalidID;
+        return if (entries[idx]) |*ent| ent else error.InvalidID;
+    }
+
+    pub fn getInterface(self: *ObjectMap, id: u32) error{InvalidID}![:0]const u8 {
+        return (try self.getEntry(id)).interface;
     }
 
     fn getSide(id: u32) error{InvalidID}!ProtocolSide {
         return switch (id) {
-            1, wire.client_min_id...wire.client_max_id => .client,
+            wire.client_min_id...wire.client_max_id => .client,
             wire.server_min_id...wire.server_max_id => .server,
             else => error.InvalidID,
         };
@@ -594,7 +646,7 @@ const ObjectInterfaceMap = struct {
     }
 
     fn ensureCapacity(
-        self: *ObjectInterfaceMap,
+        self: *ObjectMap,
         gpa: std.mem.Allocator,
         idx: usize,
         side: ProtocolSide,
@@ -609,7 +661,7 @@ const ObjectInterfaceMap = struct {
         if (idx == interfaces.len) {
             const new_capacity = if (interfaces.len == 0) initial_capacity else interfaces.len * 2;
             const new_memory = gpa.remap(interfaces, new_capacity) orelse mem: {
-                const new_memory = try gpa.alloc(?[:0]const u8, new_capacity);
+                const new_memory = try gpa.alloc(?Entry, new_capacity);
                 @memcpy(new_memory[0..interfaces.len], interfaces);
                 gpa.free(interfaces);
                 break :mem new_memory;
