@@ -97,6 +97,7 @@ pub fn emitIncomingMessage(
 
     const parent_entry = try map.get(interface);
 
+    try self.emitSinceInfo(writer);
     if (self.description) |d| try d.write(writer, "\t/// ");
     try writer.print("\tpub const {s}Message = struct {{\n", .{name});
     try writer.print("\t\tpub const _name = \"{s}\";\n", .{self.name});
@@ -148,6 +149,7 @@ pub fn emitOutgoingMessage(
     const fn_name = try self.fnName(gpa);
     defer gpa.free(fn_name);
 
+    try self.emitSinceInfo(writer);
     const max_length = self.calculateMaxLength();
     try writer.print("\n\tpub const {s}_message_opcode = {d};\n", .{ self.name, opcode });
     try writer.print("\tpub const {s}_message_length = {d};\n\n", .{ self.name, max_length });
@@ -158,6 +160,13 @@ pub fn emitOutgoingMessage(
         .any_new_id => break self.emitGenericConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         else => continue,
     } else self.emitNormal(gpa, writer, map, parent_interface_entry.type_name, fn_name);
+}
+
+fn emitSinceInfo(self: *const Message, writer: *std.Io.Writer) !void {
+    try writer.print("\n\tpub const {s}_message_since_version = {d};\n", .{ self.name, self.since });
+    if (self.deprecated_since) |dep_since|
+        try writer.print("\tpub const {s}_message_deprecated_since_version = {d};\n", .{ self.name, dep_since });
+    try writer.writeAll("\n");
 }
 
 fn emitNormal(
