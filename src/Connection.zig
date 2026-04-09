@@ -95,13 +95,8 @@ pub inline fn getFd(self: *const Connection) std.posix.fd_t {
     return self.stream.socket.handle;
 }
 
-pub fn nextSerial(self: *Connection) error{OutOfSerials}!u32 {
-    if (self.next_serial == std.math.maxInt(u32)) {
-        @branchHint(.cold);
-        return error.OutOfSerials;
-    }
-
-    defer self.next_serial += 1;
+pub fn nextSerial(self: *Connection) u32 {
+    defer self.next_serial +%= 1;
     return self.next_serial;
 }
 
