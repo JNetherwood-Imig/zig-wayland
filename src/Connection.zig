@@ -275,7 +275,8 @@ pub fn flush(self: *Connection) FlushError!void {
         switch (std.posix.errno(rc)) {
             // We ignore EPIPE and ECONNRESET so as to not crash the application, allowing the user
             // to gracefully handle being killed by the server.
-            .SUCCESS, .PIPE, .CONNRESET => break @intCast(rc),
+            .SUCCESS => break @intCast(rc),
+            .PIPE, .CONNRESET => break 0,
 
             .NOBUFS, .NOMEM => return error.OutOfMemory,
 
