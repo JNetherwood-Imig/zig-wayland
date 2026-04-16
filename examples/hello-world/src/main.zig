@@ -132,7 +132,7 @@ fn createBuffer() !void {
     @memset(shm_data, 255);
 
     const pool = try shm.createPool(&conn, fd, size);
-    defer pool.destroy(&conn) catch {};
+    defer pool.destroy(&conn);
 
     buffer = try pool.createBuffer(&conn, 0, width, height, stride, .argb8888);
 }

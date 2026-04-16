@@ -29,7 +29,7 @@ pub fn main(args: std.process.Init) !void {
             },
             .sync => |sync| {
                 const cb = sync.callback;
-                try cb.done(&conn, 0);
+                cb.done(&conn, 0);
             },
         },
         else => |r| log.debug("Received {any}.", .{r}),

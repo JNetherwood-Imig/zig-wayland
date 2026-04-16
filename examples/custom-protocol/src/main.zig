@@ -51,13 +51,12 @@ pub fn main(args: std.process.Init) !void {
     }
 
     const surface = try comp.createSurface(&conn);
+    defer surface.destroy(&conn);
+
     const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, surface);
+    defer hyprland_surf.destroy(&conn);
 
     // We won't actually do anything now since this is just a brief demo for building
     // and using custom protocols.
     std.log.info("Created hyprland surface, exiting...", .{});
-
-    try hyprland_surf.destroy(&conn);
-    try surface.destroy(&conn);
-    try surface_mgr.destroy(&conn);
 }

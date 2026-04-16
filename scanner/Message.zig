@@ -155,7 +155,8 @@ pub fn emitOutgoingMessage(
     try writer.print("\tpub const {s}_message_length = {d};\n\n", .{ self.name, max_length });
 
     if (self.description) |d| try d.write(writer, "\t/// ");
-    try for (self.args) |arg| switch (arg.type) {
+
+    return for (self.args) |arg| switch (arg.type) {
         .new_id => break self.emitConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         .any_new_id => break self.emitGenericConstructor(gpa, writer, map, parent_interface_entry.type_name, fn_name),
         else => continue,
@@ -189,9 +190,15 @@ fn emitNormal(
     try writer.print("\t\tself: {s},\n", .{parent_interface});
     try writer.writeAll("\t\tconnection: *Connection,\n");
     for (self.args) |arg| try arg.write(gpa, writer, map);
-    try writer.writeAll("\t) core.Connection.SendError!void {\n");
+    try writer.writeAll(switch (self.type) {
+        .none => "\t) core.Connection.SendError!void {\n",
+        .destructor => "\t) void {\n",
+    });
 
-    try writer.writeAll("\t\ttry connection.sendMessage(\n");
+    try writer.writeAll(switch (self.type) {
+        .none => "\t\ttry connection.sendMessage(\n",
+        .destructor => "\t\tconnection.sendMessage(\n",
+    });
     try writer.writeAll("\t\t\tself.getId(),\n");
     try writer.print("\t\t\t{s}_message_length,\n", .{self.name});
     try writer.print("\t\t\t{s}_message_opcode,\n", .{self.name});
@@ -203,7 +210,10 @@ fn emitNormal(
         for (self.args) |arg| if (arg.type == .fd) try writer.print("\t\t\t\t{s}_,\n", .{arg.name});
         try writer.writeAll("\t\t\t},\n");
     }
-    try writer.writeAll("\t\t);\n");
+    try writer.writeAll(switch (self.type) {
+        .none => "\t\t);\n",
+        .destructor => "\t\t) catch {};\n",
+    });
 
     try writer.writeAll("\t}\n\n");
 }
