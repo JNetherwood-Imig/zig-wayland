@@ -13,7 +13,7 @@ pub const Error = error{ NoXdgRuntimeDir, PathTooLong };
 pub fn default(env: *std.process.Environ.Map) Error!Address {
     if (env.get("WAYLAND_SOCKET")) |sock_str| {
         if (std.fmt.parseInt(std.posix.fd_t, sock_str, 10)) |sock|
-            return .initSocketFd(sock)
+            return .fromFd(sock)
         else |_| {}
     }
 
@@ -22,7 +22,7 @@ pub fn default(env: *std.process.Environ.Map) Error!Address {
     return .initEndpoint(env, wayland_display);
 }
 
-pub fn initSocketFd(sock: std.posix.fd_t) Address {
+pub fn fromFd(sock: std.posix.fd_t) Address {
     return Address{
         .strategy = .sock,
         .info = .{ .sock = sock },

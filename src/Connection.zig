@@ -51,6 +51,16 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, addr: Address) !Connection {
     };
 }
 
+/// Deinitializes all internal resources.
+pub fn deinit(self: *Connection) void {
+    for (self.fd_out.slice()) |fd| _ = std.posix.system.close(fd);
+    for (self.fd_in.slice()) |fd| _ = std.posix.system.close(fd);
+    self.id_free_list.deinit(self.gpa);
+    self.map.deinit(self.gpa);
+    self.stream.close(self.io);
+    self.* = undefined;
+}
+
 /// Creates a new `Connection` from `stream`
 /// Takes ownership of `stream`.
 /// Stores `io` and `gpa` for internal use.
@@ -80,26 +90,18 @@ pub fn fromStream(
     };
 }
 
-/// Deinitializes all internal resources.
-pub fn deinit(self: *Connection) void {
-    for (self.fd_out.slice()) |fd| _ = std.posix.system.close(fd);
-    for (self.fd_in.slice()) |fd| _ = std.posix.system.close(fd);
-    self.id_free_list.deinit(self.gpa);
-    self.map.deinit(self.gpa);
-    self.stream.close(self.io);
-    self.* = undefined;
-}
-
 /// Convenience method for accessing stream handle.
 pub inline fn getFd(self: *const Connection) std.posix.fd_t {
     return self.stream.socket.handle;
 }
 
+/// Gets next available serial for messages
 pub fn nextSerial(self: *Connection) u32 {
     defer self.next_serial +%= 1;
     return self.next_serial;
 }
 
+/// Sets the user data pointer for an object
 pub fn setObjectUserData(
     self: *Connection,
     object: u32,
@@ -111,12 +113,14 @@ pub fn setObjectUserData(
     entry.destroyUserDataCallback = destructor;
 }
 
+/// Gets the user data for an object
 pub fn getObjectUserData(self: *Connection, object: u32) error{InvalidID}!?*anyopaque {
     const entry = try self.map.getEntry(object);
     return entry.user_data;
 }
 
-pub fn destroyObjectUserData(self: *const Connection, gpa: std.mem.Allocator, object: u32) anyerror!void {
+/// Runs the destructor for an object's user data
+pub fn destroyObjectUserData(self: *Connection, gpa: std.mem.Allocator, object: u32) anyerror!void {
     const entry = try self.map.getEntry(object);
     if (entry.user_data) |data| if (entry.destroyUserDataCallback) |destroyFn| try destroyFn(data, gpa);
 }
@@ -163,10 +167,7 @@ pub const NextMessageError = FlushError ||
 /// `timeout` can be `.none`, `.{ .duration = [duration] }`, `.{ .deadline = [deadline] }`,
 /// or `null` for instant timeout.
 pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) NextMessageError!Message {
-    const deadline: ?std.Io.Clock.Timestamp = if (timeout) |t|
-        t.toDeadline(self.io) catch .{ .clock = .awake, .raw = .zero }
-    else
-        .{ .clock = .awake, .raw = .zero };
+    const deadline = if (timeout) |t| t.toDeadline(self.io).toTimestamp(self.io) else std.Io.Clock.Timestamp{ .clock = .awake, .raw = .zero };
 
     try self.flush();
 
@@ -307,7 +308,7 @@ pub fn flush(self: *Connection) FlushError!void {
 
     if (sent == 0) return error.ConnectionClosed;
 
-    for (fds) |fd| std.posix.close(fd);
+    for (fds) |fd| _ = std.posix.system.close(fd);
 
     self.data_out.start = 0;
     self.data_out.end = 0;
@@ -338,30 +339,29 @@ fn peekHeader(self: *const Connection) ?wire.Header {
 
 const ReadIncomingError = std.posix.PollError || error{ ConnectionClosed, Timeout, OutOfMemory, OutOfSpace };
 
+/// Try to read incoming data from the socket, returning error.Timeout if deadline is passed
 fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) ReadIncomingError!void {
     self.data_in.shiftToStart();
     self.fd_in.shiftToStart();
 
     const timeout_ms: i32 = if (deadline) |d| ms: {
-        const remaining = d.durationFromNow(self.io) catch
-            std.Io.Clock.Duration{ .clock = .awake, .raw = .zero };
-        break :ms if (remaining.raw.nanoseconds <= 0) 0 else @intCast(remaining.raw.toMilliseconds());
+        const remaining_ms = d.durationFromNow(self.io).raw.toMilliseconds();
+        if (remaining_ms <= 0) return error.Timeout;
+        break :ms @intCast(remaining_ms);
     } else -1;
 
-    var pfds = [1]std.posix.pollfd{.{
+    var pfd = [1]std.posix.pollfd{.{
         .fd = self.stream.socket.handle,
         .events = std.posix.POLL.IN,
         .revents = 0,
     }};
 
-    const count = try std.posix.poll(&pfds, timeout_ms);
+    const count = try std.posix.poll(&pfd, timeout_ms);
     if (count == 0) return error.Timeout;
 
     const data = self.data_in.data[self.data_in.end..];
     var iov = [1]std.posix.iovec{.{ .base = data.ptr, .len = data.len }};
-
     var control: [cmsg.space(wire.libwayland_max_message_args)]u8 align(@alignOf(cmsg.Header)) = undefined;
-
     var msg = std.posix.msghdr{
         .name = null,
         .namelen = 0,

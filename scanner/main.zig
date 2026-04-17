@@ -4,15 +4,10 @@ const Allocator = std.mem.Allocator;
 const Protocol = @import("Protocol.zig");
 const InterfaceMap = @import("InterfaceMap.zig");
 
-pub fn main(init: std.process.Init.Minimal) !void {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
-
-    var io_impl: std.Io.Threaded = .init_single_threaded;
-    const io = io_impl.io();
-
-    var args = init.args.iterate();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+    var args = init.minimal.args.iterate();
     _ = args.skip();
 
     const mode = mode: {

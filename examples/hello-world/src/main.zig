@@ -83,7 +83,7 @@ pub fn main(args: std.process.Init) !void {
             try xdg_surf.ackConfigure(&conn, ev.configure.serial);
             if (!configured) {
                 // Create and register the buffer.
-                try createBuffer();
+                try createBuffer(io);
                 // Attach buffer to our surface so it can be presented.
                 try surf.attach(&conn, buffer, 0, 0);
             }
@@ -112,12 +112,12 @@ pub fn main(args: std.process.Init) !void {
 }
 
 // Create a wl_buffer backed by shm.
-fn createBuffer() !void {
+fn createBuffer(io: std.Io) !void {
     const stride = width * 4;
     const size = stride * height;
 
-    const fd = try allocateShmFile(size);
-    defer std.posix.close(fd);
+    const fd = try allocateShmFile(io, size);
+    defer _ = std.posix.system.close(fd);
 
     shm_data = try std.posix.mmap(
         null,
@@ -142,16 +142,16 @@ fn createBuffer() !void {
 // by libc and not available in zig std.os.linux or std.posix.
 
 /// Allocate an shm file descriptor, truncated to `size` bytes.
-fn allocateShmFile(size: usize) !i32 {
-    const fd = try createShmFile();
-    return switch (std.posix.errno(std.os.linux.ftruncate(fd, @intCast(size)))) {
+fn allocateShmFile(io: std.Io, size: usize) !i32 {
+    const fd = try createShmFile(io);
+    return switch (std.posix.errno(std.posix.system.ftruncate(fd, @intCast(size)))) {
         .SUCCESS => fd,
         else => |err| std.posix.unexpectedErrno(err),
     };
 }
 
 /// Create an shm file descriptor.
-fn createShmFile() !i32 {
+fn createShmFile(io: std.Io) !i32 {
     const shm_prefix = "/dev/shm/wl_shm-";
     const shm_perms = 0o0600;
     const shm_opts: std.posix.O = .{
@@ -166,22 +166,22 @@ fn createShmFile() !i32 {
     @memcpy(path[0..shm_prefix.len], shm_prefix);
 
     const fd: i32 = while (true) {
-        try randomize(path[shm_prefix.len..]);
-        const rc = std.os.linux.open(&path, shm_opts, shm_perms);
+        try randomize(io, path[shm_prefix.len..]);
+        const rc = std.posix.system.open(&path, shm_opts, shm_perms);
         switch (std.posix.errno(rc)) {
             .SUCCESS => break @intCast(rc),
             else => continue,
         }
     };
 
-    _ = std.os.linux.unlink(&path);
+    _ = std.posix.system.unlink(&path);
     return fd;
 }
 
 /// Fill `buf` with random characters.
-fn randomize(buf: []u8) !void {
-    const ts = try std.posix.clock_gettime(.REALTIME);
-    var r = ts.nsec;
+fn randomize(io: std.Io, buf: []u8) !void {
+    const now = std.Io.Clock.now(.real, io);
+    var r = now.nanoseconds;
     for (buf) |*byte| {
         byte.* = 'A' + @as(u8, @intCast((r & 15) + (r & 16) * 2));
         r >>= 5;
