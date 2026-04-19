@@ -12,14 +12,15 @@ pub const Error = error{ NoXdgRuntimeDir, PathTooLong };
 
 pub fn default(env: *std.process.Environ.Map) Error!Address {
     if (env.get("WAYLAND_SOCKET")) |sock_str| {
-        if (std.fmt.parseInt(std.posix.fd_t, sock_str, 10)) |sock|
-            return .fromFd(sock)
-        else |_| {}
+        if (std.fmt.parseInt(std.posix.fd_t, sock_str, 10)) |sock| {
+            _ = env.swapRemove("WAYLAND_SOCKET");
+            return .fromFd(sock);
+        } else |_| {}
     }
 
     const wayland_display = env.get("WAYLAND_DISPLAY") orelse "wayland-0";
 
-    return .initEndpoint(env, wayland_display);
+    return .fromEndpoint(env, wayland_display);
 }
 
 pub fn fromFd(sock: std.posix.fd_t) Address {
@@ -29,7 +30,7 @@ pub fn fromFd(sock: std.posix.fd_t) Address {
     };
 }
 
-pub fn initEndpoint(env: *std.process.Environ.Map, endpoint: []const u8) Error!Address {
+pub fn fromEndpoint(env: *const std.process.Environ.Map, endpoint: []const u8) Error!Address {
     const xdg_runtime_dir = env.get("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
     var self = Address{
@@ -41,7 +42,7 @@ pub fn initEndpoint(env: *std.process.Environ.Map, endpoint: []const u8) Error!A
     return self;
 }
 
-pub fn initAbsolutePath(path: []const u8) Error!Address {
+pub fn fromAbsolutePath(path: []const u8) Error!Address {
     if (path.len > std.Io.net.UnixAddress.max_len) return error.PathTooLong;
     var self = Address{
         .strategy = .path,

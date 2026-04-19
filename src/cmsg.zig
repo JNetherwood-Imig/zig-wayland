@@ -3,9 +3,8 @@ const alignment: usize = @sizeOf(usize);
 
 pub const Header = extern struct {
     len: usize,
-    level: c_int = std.os.linux.SOL.SOCKET,
-    type: c_int = 0x01, // SCM_RIGHTS (used for passing fds)
-
+    level: c_int = std.posix.system.SOL.SOCKET,
+    type: c_int = std.posix.system.SCM.RIGHTS,
 };
 
 pub inline fn @"align"(size: usize) usize {
