@@ -4,24 +4,20 @@ const Allocator = std.mem.Allocator;
 const Protocol = @import("Protocol.zig");
 const InterfaceMap = @import("InterfaceMap.zig");
 
-pub fn main() !void {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
-
-    var args = std.process.args();
-    _ = args.skip(); // skip program name
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+    var args = init.minimal.args.iterate();
+    _ = args.skip();
 
     const mode = mode: {
         const mode_str = args.next() orelse return error.InvalidArgs;
         break :mode std.meta.stringToEnum(Mode, mode_str) orelse return error.InvalidMode;
     };
 
-    const input_file = file: {
-        const input_path = args.next() orelse return error.InvalidArgs;
-        break :file try std.fs.cwd().openFile(input_path, .{});
-    };
-    defer input_file.close();
+    const input_path = args.next() orelse return error.InvalidArgs;
+    const input_file = try std.Io.Dir.cwd().openFile(io, input_path, .{});
+    defer input_file.close(io);
 
     var prefix: ?[]const u8 = null;
     var output_path: ?[]const u8 = null;
@@ -39,7 +35,7 @@ pub fn main() !void {
     }
 
     var input_buffer: [4096]u8 = undefined;
-    var input_reader = input_file.reader(&input_buffer);
+    var input_reader = input_file.reader(io, &input_buffer);
     const io_reader = &input_reader.interface;
 
     var stream_reader = xml.Reader.Streaming.init(gpa, io_reader, .{});
@@ -55,16 +51,16 @@ pub fn main() !void {
         try map.put(gpa, &protocol, &iface);
     }
 
-    try addImportsToMap(gpa, &map, imports.items);
+    try addImportsToMap(io, gpa, &map, imports.items);
 
     const file_ext = if (mode == .dep_info) "dep" else "zig";
     var output_file_buf: [1024]u8 = undefined;
     output_path = output_path orelse try std.fmt.bufPrint(&output_file_buf, "{s}.{s}", .{ protocol.name, file_ext });
-    const output_file = try std.fs.cwd().createFile(output_path.?, .{});
-    defer output_file.close();
+    const output_file = try std.Io.Dir.cwd().createFile(io, output_path.?, .{});
+    defer output_file.close(io);
 
     var output_buffer: [4096]u8 = undefined;
-    var file_writer = output_file.writer(&output_buffer);
+    var file_writer = output_file.writer(io, &output_buffer);
     const writer = &file_writer.interface;
     defer writer.flush() catch {};
 
@@ -87,12 +83,12 @@ fn parseDocument(gpa: Allocator, reader: *xml.Reader, prefix: []const u8) !Proto
     return error.UnexpectedEof;
 }
 
-fn addImportsToMap(gpa: Allocator, map: *InterfaceMap, imports: []const []const u8) !void {
+fn addImportsToMap(io: std.Io, gpa: Allocator, map: *InterfaceMap, imports: []const []const u8) !void {
     for (imports) |path| {
-        const import_file = try std.fs.cwd().openFile(path, .{});
-        defer import_file.close();
+        const import_file = try std.Io.Dir.cwd().openFile(io, path, .{});
+        defer import_file.close(io);
         var import_buf: [4096]u8 = undefined;
-        var import_reader = import_file.reader(&import_buf);
+        var import_reader = import_file.reader(io, &import_buf);
         const import_content = try import_reader.interface.allocRemaining(gpa, .unlimited);
         defer gpa.free(import_content);
         var line_it = std.mem.tokenizeScalar(u8, import_content, '\n');

@@ -1,49 +1,40 @@
 const std = @import("std");
+
 const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
-const Allocator = std.mem.Allocator;
+
 const log = std.log.scoped(.server);
 
-const Request = wayland.MessageUnion(.{wl});
-const RequestHandler = wayland.MessageHandler(Request);
+const Request = wayland.Message(.{wl});
 
-pub fn main() !void {
-    var sock_info: wayland.SocketInfo = .auto;
-    const server = sock_info.listen() catch |err| {
-        log.err("Failed to create {f}.", .{sock_info});
-        return err;
-    };
-    defer server.close();
+pub fn main(args: std.process.Init) !void {
+    const io = args.io;
+    const env = args.environ_map;
+    const gpa = args.gpa;
 
-    log.info("Server running on {f}.", .{sock_info});
+    var server = try wayland.Server.init(io, env);
+    defer server.deinit(io);
 
-    if (server.waitForConnection(10 * std.time.ms_per_s)) {
-        log.info("Got connection!", .{});
+    log.info("Server running on {s}.", .{server.socketPath()});
 
-        var conn = try server.accept();
-        defer conn.deinit();
+    var conn = try server.accept(io, gpa);
+    defer conn.deinit();
+    log.info("Got connection!", .{});
 
-        var client_interface_buf: [32]?[:0]const u8 = @splat(null);
-        var handler = RequestHandler.initBuffered(&client_interface_buf, &.{});
-
-        const disp: wl.Display = .display;
-        try handler.addObjectBounded(disp);
-
-        while (handler.waitNextMessage(&conn)) |req| switch (req) {
-            .wl_display => |disp_req| switch (disp_req) {
-                .get_registry => |get_reg| {
-                    log.debug("Received get registry (id = {d}).", .{get_reg.registry});
-                    log.warn("Registry is not implemented.", .{});
-                },
-                .sync => |sync| {
-                    const cb = sync.callback;
-                    try cb.done(&conn, 0);
-                },
+    while (conn.nextMessage(Request, .none)) |request| switch (request) {
+        .wl_display => |req| switch (req) {
+            .get_registry => |get_reg| {
+                log.debug("Received get registry (id = {d}).", .{get_reg.registry});
+                log.warn("Registry is not implemented.", .{});
             },
-            else => |r| log.debug("Received {any}.", .{r}),
-        } else |err| switch (err) {
-            error.ConnectionClosed => log.info("Client closed its connection.", .{}),
-            else => |e| return e,
-        }
-    } else |_| log.info("Timed out, exiting...", .{});
+            .sync => |sync| {
+                const cb = sync.callback;
+                cb.done(&conn, 0);
+            },
+        },
+        else => |r| log.debug("Received {any}.", .{r}),
+    } else |err| switch (err) {
+        error.ConnectionClosed => log.info("Client closed its connection.", .{}),
+        else => |e| return e,
+    }
 }

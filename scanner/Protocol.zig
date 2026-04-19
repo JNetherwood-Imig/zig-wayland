@@ -106,6 +106,7 @@ pub fn emitServerCode(
 }
 
 fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []const u8) !void {
+    try writer.writeAll("const std = @import(\"std\");\n");
     try writer.writeAll("const core = @import(\"core\");\n");
     try writer.writeAll("const wire = core.wire;\n");
     try writer.writeAll("const Connection = core.Connection;\n");
@@ -113,7 +114,7 @@ fn emitFooter(self: *const Protocol, writer: *std.Io.Writer, imports: []const []
     try writer.writeAll("const Fixed = core.Fixed;\n");
     try writer.print("const {s} = @This();\n", .{self.name});
     for (imports) |raw_import| {
-        const import = std.mem.sliceTo(std.fs.path.basename(raw_import), '.');
+        const import = std.mem.sliceTo(std.Io.Dir.path.basename(raw_import), '.');
         try writer.print("const {s} = @import(\"{s}\");\n", .{ import, import });
     }
 

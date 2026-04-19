@@ -2,15 +2,15 @@
 
 const std = @import("std");
 
-pub const Fixed = packed struct(i32) {
-    _: i32,
+pub const Fixed = enum(i32) {
+    _,
 
     /// Create a `Fixed` storing `value`, which can be either an int, comptime int,
     /// float, or comptime float.
     pub fn from(value: anytype) Fixed {
         return switch (@typeInfo(@TypeOf(value))) {
-            .int, .comptime_int => @bitCast(@as(i32, @intCast(value * 256))),
-            .float, .comptime_float => @bitCast(@as(i32, @intFromFloat(@round(value * 256.0)))),
+            .int, .comptime_int => @enumFromInt(@as(i32, @intCast(value * 256))),
+            .float, .comptime_float => @enumFromInt(@as(i32, @intFromFloat(@round(value * 256.0)))),
             else => @compileError("Unsupported type."),
         };
     }
@@ -18,15 +18,15 @@ pub const Fixed = packed struct(i32) {
     /// Get a `T` from `self` where `T` is either a float or int
     pub fn to(self: Fixed, comptime T: type) T {
         return switch (@typeInfo(T)) {
-            .int => @as(T, @intCast(@divTrunc(@as(i32, @bitCast(self)), 256))),
-            .float => @as(T, @floatFromInt(@as(i32, @bitCast(self)))) / 256.0,
+            .int => @as(T, @intCast(@divTrunc(@as(i32, @intFromEnum(self)), 256))),
+            .float => @as(T, @floatFromInt(@as(i32, @intFromEnum(self)))) / 256.0,
             else => @compileError("Unsupported type."),
         };
     }
 
     /// Equivelant of `self + other`.
     pub fn add(self: Fixed, other: Fixed) Fixed {
-        return @bitCast(@as(i32, @bitCast(self)) + @as(i32, @bitCast(other)));
+        return @enumFromInt(@as(i32, @intFromEnum(self)) + @as(i32, @intFromEnum(other)));
     }
 
     /// Equivalent of `self += other`.
@@ -36,7 +36,7 @@ pub const Fixed = packed struct(i32) {
 
     /// Equivalent of `self - other`.
     pub fn sub(self: Fixed, other: Fixed) Fixed {
-        return @bitCast(@as(i32, @bitCast(self)) - @as(i32, @bitCast(other)));
+        return @enumFromInt(@as(i32, @intFromEnum(self)) - @as(i32, @intFromEnum(other)));
     }
 
     /// Equivalent of `self -= other`.
@@ -46,7 +46,7 @@ pub const Fixed = packed struct(i32) {
 
     /// Equivalent of `self * other`.
     pub fn mul(self: Fixed, other: Fixed) Fixed {
-        return @bitCast(@as(i32, @bitCast(self)) * @as(i32, @bitCast(other)) >> 8);
+        return @enumFromInt(@as(i32, @intFromEnum(self)) * @as(i32, @intFromEnum(other)) >> 8);
     }
 
     /// Equivalent of `self *= other`.
@@ -66,7 +66,7 @@ pub const Fixed = packed struct(i32) {
 
     /// Allow for printing of a `Fixed` using the format string `"{d}"`.
     /// It will be printed as an `f64`.
-    pub fn formatNumber(self: Fixed, writer: *std.io.Writer, number: std.fmt.Number) !void {
+    pub fn formatNumber(self: Fixed, writer: *std.Io.Writer, number: std.fmt.Number) !void {
         try writer.printFloat(self.to(f64), number);
     }
 };

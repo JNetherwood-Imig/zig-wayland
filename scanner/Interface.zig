@@ -131,6 +131,9 @@ pub fn emitServerCode(
 ) !void {
     try self.emitCommon(writer, map);
 
+    const entry = try map.get(self.name);
+    for (self.enums.items) |en| if (std.mem.eql(u8, en.name, "error")) try emitPostError(writer, entry.type_name);
+
     for (self.requests, 0..) |request, opcode|
         try request.emitIncomingMessage(gpa, writer, map, self.name, opcode);
 
@@ -157,11 +160,21 @@ fn emitCommon(
     try writer.print("\tpub const interface = \"{s}\";\n\n", .{self.name});
     try writer.writeAll("\tpub const Version = enum(u32) {\n");
     for (0..self.version) |v| try writer.print("\t\tv{d} = {d},\n", .{ v + 1, v + 1 });
+    try writer.writeAll(
+        "\t\tpub inline fn toU32(self: Version) u32 {\n\t\t\treturn @intFromEnum(self);\n\t\t}\n",
+    );
     try writer.writeAll("\t};\n\n");
     try writer.print(
-        "\tpub fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n",
+        "\tpub inline fn getId(self: {s}) u32 {{\n\t\treturn @intFromEnum(self);\n\t}}\n\n",
         .{type_name},
     );
+    try writer.print("\tpub inline fn setUserData" ++
+        "(self: {s}, conn: *core.Connection, user_data: ?*anyopaque, " ++
+        "destructor: ?*const fn (*anyopaque, std.mem.Allocator) anyerror!void) error{{InvalidID}}!void {{" ++
+        "\n\t\ttry conn.setObjectUserData(self.getId(), user_data, destructor);\n\t}}\n\n", .{type_name});
+    try writer.print("\tpub inline fn getUserData" ++
+        "(self: {s}, conn: *core.Connection) error{{InvalidID}}!?*anyopaque {{" ++
+        "\n\t\treturn conn.getObjectUserData(self.getId());\n\t}}\n\n", .{type_name});
 }
 
 pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]const u8 {
@@ -187,4 +200,17 @@ pub fn typeName(self: *const Interface, gpa: Allocator, prefix: []const u8) ![]c
     };
 
     return util.snakeToPascal(gpa, stripped_name);
+}
+
+fn emitPostError(w: *std.Io.Writer, tn: []const u8) !void {
+    try w.print("\tpub fn postError(self: {s},\n " ++
+        "\t\tconn: *core.Connection,\n" ++
+        "\t\tcode: Error,\n" ++
+        "\t\tcomptime fmt: []const u8,\n" ++
+        "\t\targs: anytype\n" ++
+        "\t) void {{\n", .{tn});
+    try w.writeAll("\t\tvar buf: [4096:0]u8 = undefined;\n");
+    try w.writeAll("\t\tconst msg = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch return;\n");
+    try w.writeAll("\t\twayland.Display.display.@\"error\"(conn, self.getId(), @intCast(@intFromEnum(code)), msg) catch {};\n");
+    try w.writeAll("\t}\n\n");
 }

@@ -2,22 +2,22 @@
     .name = .wayland,
     .fingerprint = 0xa8d655e4cf50fda,
     .version = "1.1.0",
-    .minimum_zig_version = "0.15.0",
+    .minimum_zig_version = "0.16.0",
 
     .paths = .{""},
 
     .dependencies = .{
         .xml = .{
-            .url = "git+https://github.com/ianprime0509/zig-xml#8874de5b846f4e3e806a062cd11a01b2bb90fc7a",
-            .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
+            .url = "git+https://github.com/ianprime0509/zig-xml.git#b97f2ab4868ae3cac9902b33a40d3f31d2df739d",
+            .hash = "xml-0.2.0-ZTbP3yI6AgB9Rpd2hQrueO63ib0Bm6mQiL_WB1t7JAmP",
         },
         .wayland = .{
-            .url = "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.24.0/downloads/wayland-1.24.0.tar.xz",
-            .hash = "N-V-__8AAGoeGQBEn6KguTJUXrCE0tIRrrXfQX7hYHoKCJwZ",
+            .url = "git+https://gitlab.freedesktop.org/wayland/wayland.git#e647f6304d7491fa436047908dc559f5badf613e",
+            .hash = "N-V-__8AAOYnJQB7_v_8zvgC483VzXHVn_Tyc96Ax04lTxHn",
         },
         .wayland_protocols = .{
-            .url = "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.47/downloads/wayland-protocols-1.47.tar.xz",
-            .hash = "N-V-__8AAFdWDwA0ktbNUi9pFBHCRN4weXIgIfCrVjfGxqgA",
+            .url = "git+https://gitlab.freedesktop.org/wayland/wayland-protocols.git#deddd9fe29c8309020351ab26af0c0db048f1d5f",
+            .hash = "N-V-__8AABp6EAAKyF6FLlzpQ4vutiuL4PcULI4nnEAhT0A1",
         },
         .wlr_protocols = .{
             .url = "git+https://gitlab.freedesktop.org/wlroots/wlr-protocols.git#a741f0ac5d655338a5100fc34bc8cec87d237346",

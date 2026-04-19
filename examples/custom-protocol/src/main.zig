@@ -2,48 +2,36 @@ const std = @import("std");
 const wayland = @import("wayland");
 const wl = @import("wayland_protocol");
 const hyprland = @import("hyprland_surface");
-const Event = wayland.MessageUnion(.{ wl, hyprland });
-const EventHandler = wayland.MessageHandler(Event);
+const Event = wayland.Message(.{ wl, hyprland });
 
-pub fn main() !void {
-    var gpa_state: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
-
-    // Setup ID allocator
-    var ida = wayland.IdAllocator.empty_client;
+pub fn main(args: std.process.Init) !void {
+    const io = args.io;
+    const env = args.environ_map;
+    const gpa = args.gpa;
 
     // Connecto to server
-    var sock_info: wayland.SocketInfo = .auto;
-    var conn = try sock_info.connect();
+    const addr = try wayland.Address.default(env);
+    var conn = try wayland.Connection.init(io, gpa, addr);
     defer conn.deinit();
 
-    // Initialize event handler
-    var handler = try EventHandler.initCapacity(gpa, 8);
-    defer handler.deinit(gpa);
-
     const disp: wl.Display = .display;
-    try handler.addObject(gpa, disp);
+    const reg = try disp.getRegistry(&conn);
 
-    const reg = try disp.getRegistry(&conn, &ida);
-    try handler.addObject(gpa, reg);
-
-    const sync_cb = try disp.sync(&conn, &ida);
-    try handler.addObject(gpa, sync_cb);
+    _ = try disp.sync(&conn);
 
     var comp: wl.Compositor = .invalid;
     var surface_mgr: hyprland.SurfaceManager = .invalid;
 
-    while (handler.waitNextMessage(&conn)) |ev| switch (ev) {
-        .wl_registry => |reg_ev| switch (reg_ev) {
+    while (conn.nextMessage(Event, .none)) |event| switch (event) {
+        .wl_registry => |ev| switch (ev) {
             .global => |glob| {
                 if (std.mem.eql(u8, glob.interface, wl.Compositor.interface)) {
-                    comp = try reg.bind(&conn, &ida, wl.Compositor, .v6, glob.name);
+                    comp = try reg.bind(&conn, wl.Compositor, .v6, glob.name);
                     continue;
                 }
                 if (std.mem.eql(u8, glob.interface, hyprland.SurfaceManager.interface)) {
                     std.log.info("Found hyprland surface manager.", .{});
-                    surface_mgr = try reg.bind(&conn, &ida, hyprland.SurfaceManager, .v2, glob.name);
+                    surface_mgr = try reg.bind(&conn, hyprland.SurfaceManager, .v2, glob.name);
                     continue;
                 }
             },
@@ -62,15 +50,13 @@ pub fn main() !void {
         return error.SurfaceManagerNotFound;
     }
 
-    const surface = try comp.createSurface(&conn, &ida);
-    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, &ida, surface);
+    const surface = try comp.createSurface(&conn);
+    defer surface.destroy(&conn);
+
+    const hyprland_surf = try surface_mgr.getHyprlandSurface(&conn, surface);
+    defer hyprland_surf.destroy(&conn);
 
     // We won't actually do anything now since this is just a brief demo for building
     // and using custom protocols.
     std.log.info("Created hyprland surface, exiting...", .{});
-
-    try hyprland_surf.destroy(&conn);
-    try surface.destroy(&conn);
-
-    try surface_mgr.destroy(&conn);
 }

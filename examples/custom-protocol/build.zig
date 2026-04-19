@@ -4,7 +4,7 @@ const wayland = @import("wayland");
 pub fn build(b: *std.Build) void {
     const wayland_dep = b.dependency("wayland", .{});
     const wayland_core = wayland_dep.module("wayland_core");
-    const wayland_scanner = wayland_dep.artifact("wayland_scanner");
+    const wayland_scanner = wayland_dep.artifact("scanner");
     const wayland_client_protocol = wayland_dep.module("wayland_client_protocol");
     const wayland_protocol_dep_info = wayland_dep.namedLazyPath("wayland_dep");
 

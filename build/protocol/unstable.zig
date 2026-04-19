@@ -1,5 +1,5 @@
 //! Last updated to wayland-protocols version 1.47
-//! 23 December 2025
+//! 30 March 2026
 
 pub const fullscreen_shell_unstable_v1 = .{
     .subpath = "unstable/fullscreen-shell/fullscreen-shell-unstable-v1.xml",

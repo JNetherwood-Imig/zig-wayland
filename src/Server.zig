@@ -1,40 +1,125 @@
 //! Simple listener to accept Wayland client connections.
 
 const std = @import("std");
+const S = std.posix.S;
+
 const Connection = @import("Connection.zig");
-const posix = std.posix;
+
+const max_displays = 100;
 
 const Server = @This();
 
-handle: std.posix.fd_t,
-/// If the server created its own socket file, then it must be removed from the filesystem at
-/// shutdown by calling `unlink`, which requiers a path.
-addr: ?std.net.Address,
+inner: std.Io.net.Server,
+lock: std.Io.File,
+path: [std.Io.net.UnixAddress.max_len:0]u8,
 
-/// Close the socket file descriptor and remove the socket file from the filesystem unless it was
-/// manually created by the user.
-pub fn close(self: Server) void {
-    if (self.addr) |addr|
-        posix.unlink(std.mem.sliceTo(&addr.un.path, 0)) catch {};
-    posix.close(self.handle);
+pub const InitError = LockDisplayError ||
+    std.Io.Dir.OpenError ||
+    std.Io.net.UnixAddress.ListenError ||
+    error{
+        NoXdgRuntimeDir,
+        NoDisplaysAvailable,
+        NameTooLong,
+        NoSpaceLeft,
+    };
+
+pub fn init(io: std.Io, env: *std.process.Environ.Map) InitError!Server {
+    const xdg_runtime_dir_path = env.get("XDG_RUNTIME_DIR") orelse
+        return error.NoXdgRuntimeDir;
+
+    const xdg_runtime_dir = try std.Io.Dir.openDirAbsolute(io, xdg_runtime_dir_path, .{});
+    defer xdg_runtime_dir.close(io);
+
+    var endpoint_buf: [12]u8 = undefined;
+    var endpoint_name: []const u8 = undefined;
+
+    const lock: std.Io.File = for (0..max_displays) |display| {
+        endpoint_name = std.fmt.bufPrint(&endpoint_buf, "wayland-{}", .{display}) catch unreachable;
+        break lockDisplay(io, xdg_runtime_dir, endpoint_name) catch |err| switch (err) {
+            error.LockFailed => continue,
+            else => |e| return e,
+        };
+    } else return error.NoDisplaysAvailable;
+    errdefer lock.close(io);
+
+    var path_buf: [std.Io.net.UnixAddress.max_len]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ xdg_runtime_dir_path, endpoint_name });
+    const addr = try std.Io.net.UnixAddress.init(path);
+
+    const server = try addr.listen(io, .{});
+
+    var self = Server{
+        .inner = server,
+        .lock = lock,
+        .path = @splat(0),
+    };
+    @memcpy(self.path[0..path.len], path);
+
+    return self;
 }
 
-/// Wait for an incoming connection attempt.
-/// `timeout` is in milliseconds and timeout of -1 will wait indefinately.
-pub fn waitForConnection(self: Server, timeout: i32) !void {
-    var pfd = [1]posix.pollfd{.{
-        .events = posix.POLL.IN,
-        .fd = self.handle,
-        .revents = 0,
-    }};
-    if (try posix.poll(&pfd, timeout) == 0)
-        return error.Timeout;
+pub fn deinit(self: *Server, io: std.Io) void {
+    const path = std.mem.sliceTo(&self.path, 0);
+    var lock_buf: [std.Io.net.UnixAddress.max_len]u8 = undefined;
+    const lock_path = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{path}) catch unreachable;
+
+    std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+    std.Io.Dir.deleteFileAbsolute(io, lock_path) catch {};
+
+    self.lock.close(io);
+    self.inner.socket.close(io);
+
+    self.* = undefined;
 }
 
-pub const AcceptError = posix.AcceptError;
+pub inline fn getFd(self: *const Server) std.posix.fd_t {
+    return self.inner.socket.handle;
+}
 
-/// Accept an incoming client connection and return a `Connection` to exchange messages
-/// with the new client.
-pub fn accept(self: Server) AcceptError!Connection {
-    return Connection{ .handle = try posix.accept(self.handle, null, null, 0) };
+pub inline fn socketPath(self: *const Server) []const u8 {
+    return std.mem.sliceTo(&self.path, 0);
+}
+
+pub inline fn endpoint(self: *const Server) []const u8 {
+    const path = self.socketPath();
+    const idx = if (std.mem.findScalarLast(u8, path, '/')) |idx| idx + 1 else 0;
+    return path[idx..];
+}
+
+pub const AcceptError = std.Io.net.Server.AcceptError || error{OutOfMemory};
+
+pub fn accept(self: *Server, io: std.Io, gpa: std.mem.Allocator) AcceptError!Connection {
+    const stream = try self.inner.accept(io);
+    return Connection.fromStream(io, gpa, stream, .server);
+}
+
+const LockDisplayError = std.Io.File.OpenError ||
+    std.Io.File.LockError ||
+    std.Io.File.StatError ||
+    error{LockFailed};
+
+fn lockDisplay(io: std.Io, xdg_runtime_dir: std.Io.Dir, endpoint_name: []const u8) !std.Io.File {
+    var lock_buf: [15]u8 = undefined;
+    const lock = std.fmt.bufPrint(&lock_buf, "{s}.lock", .{endpoint_name}) catch unreachable;
+
+    const lock_file = try xdg_runtime_dir.createFile(io, lock, .{
+        .read = true,
+        .permissions = .fromMode(S.IRUSR | S.IWUSR | S.IRGRP | S.IWGRP),
+        .lock_nonblocking = true,
+    });
+    errdefer lock_file.close(io);
+
+    if (!try lock_file.tryLock(io, .exclusive)) return error.LockFailed;
+
+    if (xdg_runtime_dir.statFile(io, endpoint_name, .{ .follow_symlinks = false })) |stat| {
+        const mode = stat.permissions.toMode();
+        if (mode & S.IWUSR == S.IWUSR or
+            mode & S.IWGRP == S.IWGRP)
+            xdg_runtime_dir.deleteFile(io, endpoint_name) catch {};
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => |e| return e,
+    }
+
+    return lock_file;
 }

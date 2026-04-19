@@ -4,7 +4,7 @@ A pure zig implementation of the Wayland protocol for creating both client and s
 
 ## Installation
 
-Can be used as a dependency of any zig 0.15 project.
+Can be used as a dependency of any zig 0.16 project.
 
 To use latest release, run
 ```sh
@@ -55,7 +55,7 @@ const wayland = @import("wayland");
 const wl = @import("wl");
 const xdg_shell = @import("xdg_shell");
 
-pub fn main() !void {...}
+pub fn main(init: std.process.Init) !void {...}
 ```
 
 ### Custom protocols
@@ -113,15 +113,3 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 }
 ```
-
-## SAFETY WARNING
-
-### If your Wayland client NEVER spawns a child process, or no child process has any chance of spawning its own child Wayland process, then you can safely ignore this warning.
-
-There are two conventional ways for a Wayland client to connect to the server. The standard way uses the WAYLAND_DISPLAY environment variable. The other way uses the WAYLAND_SOCKET environment variable. A parent Wayland client will set this and the child process will interpret it as an open file descriptor. This works fine with the libc/posix model for environment variables, but not with the zig approach.
-
-There a few ways to work around this:
-* Link libc
-  - When the resulting executable is linked with libc, the WAYLAND_SOCKET environment variable will be unset just as libwayland does, and there will be no issues.
-* Unset when spawning
-  - If you don't want to link libc, then all you have to do is spawn any child processes using execve and make sure that WAYLAND_SOCKET has been removed from the given env map.

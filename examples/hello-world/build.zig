@@ -14,7 +14,10 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addImport("wayland", wayland.module("wayland_core"));
-    exe.root_module.addImport("wayland_protocol", wayland.module("wayland_client_protocol"));
+    exe.root_module.addImport("wl", wayland.module("wayland_client_protocol"));
     exe.root_module.addImport("xdg_shell", wayland.module("xdg_shell_client_protocol"));
     b.installArtifact(exe);
+
+    const check = b.step("check", "ZLS check");
+    check.dependOn(&exe.step);
 }
