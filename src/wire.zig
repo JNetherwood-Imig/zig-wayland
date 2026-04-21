@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 
 const Fixed = @import("fixed.zig").Fixed;
 
-const log = std.log.scoped(.wayland_wire);
+const log = std.log.scoped(.wayland);
 
 pub const libwayland_max_message_size = 4096;
 pub const libwayland_max_message_args = 20;

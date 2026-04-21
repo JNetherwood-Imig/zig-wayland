@@ -170,7 +170,7 @@ pub fn writeTypeString(
             .array => "[]const u8",
             .string => "[:0]const u8",
             .optional_string => "?[:0]const u8",
-            .fd => "i32", // FIXME: should this be std.posix.fd_t?
+            .fd => "std.posix.fd_t",
             .new_id => "u32",
             .any_new_id => "core.wire.GenericNewId",
             else => unreachable,

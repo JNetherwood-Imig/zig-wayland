@@ -6,7 +6,7 @@ const cmsg = @import("cmsg.zig");
 const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
 const wire = @import("wire.zig");
 
-const log = std.log.scoped(.wayland_connection);
+const log = std.log.scoped(.wayland);
 const Connection = @This();
 
 stream: std.Io.net.Stream,

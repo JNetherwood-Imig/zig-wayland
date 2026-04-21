@@ -1,4 +1,5 @@
 const UnionFieldAttrs = @import("std").builtin.Type.UnionField.Attributes;
+
 /// Takes a tuple of generated protocols and returns a 2-level tagged union.
 /// The toplevel field corresponds to the interface, and the inner field
 /// contains each incoming message type for that interface.
@@ -10,10 +11,19 @@ const UnionFieldAttrs = @import("std").builtin.Type.UnionField.Attributes;
 ///         delete_id: wayland.Display.DeleteIdMessage,
 ///         @"error": wayland.Display.ErrorMessage,
 ///     },
+///     wl_registry: union(enum) {
+///         global: wayland.Registry.GlobalMessage,
+///         global_remove: wayland.Registry.GlobalRemoveMessage,
+///     },
+///     ...
 ///     ...
 ///     xdg_wm_base: union(enum) {
 ///         ping: xdg_shell.WmBase.PingMessage,
 ///     },
+///     xdg_surface: union(enum) {
+///         configure: xdg_shell.Surface.ConfigureMessage,
+///     },
+///     ...
 /// };
 /// ```
 pub fn MessageUnion(comptime protocols: anytype) type {
@@ -41,6 +51,7 @@ pub fn MessageUnion(comptime protocols: anytype) type {
     return @Union(.auto, backing_enum, field_names, @ptrCast(union_types.ptr), @ptrCast(union_attrs.ptr));
 }
 
+/// Generates inner message union representing messages on a specific interface.
 fn InterfaceMessageUnion(comptime Interface: type) ?type {
     comptime var field_names: []const []const u8 = &.{};
     comptime var enum_values: []const u32 = &.{};

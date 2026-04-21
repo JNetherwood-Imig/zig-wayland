@@ -1,7 +1,6 @@
-//! A 24.8 bit fixed-point number type used in the Wayland wire format in place of floats.
-
 const std = @import("std");
 
+/// A 24.8 bit fixed-point number type used in the Wayland wire format in place of floats.
 pub const Fixed = enum(i32) {
     _,
 
