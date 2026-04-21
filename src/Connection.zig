@@ -1,7 +1,7 @@
 const std = @import("std");
 const sys = std.posix.system;
 
-const Address = @import("Addresss.zig");
+const Address = @import("address.zig").Address;
 const cmsg = @import("cmsg.zig");
 const ProtocolSide = @import("wayland_core.zig").ProtocolSide;
 const wire = @import("wire.zig");

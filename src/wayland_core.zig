@@ -4,7 +4,7 @@
 //!
 //! Copyright © 2025 Jackson Netherwood-Imig.
 
-pub const Address = @import("Addresss.zig");
+pub const Address = @import("address.zig").Address;
 pub const Connection = @import("Connection.zig");
 pub const Fixed = @import("fixed.zig").Fixed;
 const message = @import("message.zig");
