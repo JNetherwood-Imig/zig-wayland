@@ -167,7 +167,10 @@ pub const NextMessageError = FlushError ||
 /// `timeout` can be `.none`, `.{ .duration = [duration] }`, `.{ .deadline = [deadline] }`,
 /// or `null` for instant timeout.
 pub fn nextMessage(self: *Connection, comptime Message: type, timeout: ?std.Io.Timeout) NextMessageError!Message {
-    const deadline = if (timeout) |t| t.toDeadline(self.io).toTimestamp(self.io) else std.Io.Clock.Timestamp{ .clock = .awake, .raw = .zero };
+    const deadline = if (timeout) |t|
+        t.toDeadline(self.io).toTimestamp(self.io)
+    else
+        std.Io.Clock.Timestamp{ .clock = .awake, .raw = .zero };
 
     try self.flush();
 
@@ -346,8 +349,7 @@ fn readIncoming(self: *Connection, deadline: ?std.Io.Clock.Timestamp) ReadIncomi
 
     const timeout_ms: i32 = if (deadline) |d| ms: {
         const remaining_ms = d.durationFromNow(self.io).raw.toMilliseconds();
-        if (remaining_ms <= 0) return error.Timeout;
-        break :ms @intCast(remaining_ms);
+        break :ms if (remaining_ms <= 0) 0 else @intCast(remaining_ms);
     } else -1;
 
     var pfd = [1]std.posix.pollfd{.{
