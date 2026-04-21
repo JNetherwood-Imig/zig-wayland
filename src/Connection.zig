@@ -476,13 +476,13 @@ fn updateMap(self: *Connection, comptime T: type, message: T) !void {
 }
 
 fn connectToAddress(io: std.Io, addr: Address) std.Io.net.UnixAddress.ConnectError!std.Io.net.Stream {
-    return switch (addr.info) {
+    return switch (addr) {
         .sock => |sock| std.Io.net.Stream{ .socket = .{
             .handle = sock,
             .address = .{ .ip4 = .loopback(0) },
         } },
         .path => |path| stream: {
-            const un = std.Io.net.UnixAddress.init(std.mem.sliceTo(&path, 0)) catch unreachable;
+            const un = std.Io.net.UnixAddress.init(std.mem.sliceTo(&path.data, 0)) catch unreachable;
             break :stream un.connect(io);
         },
     };

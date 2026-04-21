@@ -3,7 +3,10 @@ const std = @import("std");
 /// Represents the location or socket of a Wayland server.
 pub const Address = union(enum) {
     sock: std.posix.fd_t,
-    path: [std.Io.net.UnixAddress.max_len:0]u8,
+    path: struct {
+        is_from_endpoint: bool,
+        data: [std.Io.net.UnixAddress.max_len:0]u8,
+    },
 
     pub const Error = error{
         /// `XDG_RUNTIME_DIR` does not exist in the process environment.
@@ -35,17 +38,15 @@ pub const Address = union(enum) {
 
     /// Directly initializes an Address using `sock`
     pub fn fromFd(sock: std.posix.fd_t) Error!Address {
-        return Address{
-            return .{ .sock = sock },
-        };
+        return Address{ .sock = sock };
     }
 
     /// Concatenates `endpoint` with `XDG_RUNTIME_DIR` to make a path.
     pub fn fromEndpoint(env: *const std.process.Environ.Map, endpoint: []const u8) Error!Address {
         const xdg_runtime_dir = env.get("XDG_RUNTIME_DIR") orelse
             return error.NoXdgRuntimeDir;
-        var self = Address{ .path = @splat(0) };
-        _ = std.fmt.bufPrintSentinel(&self.info.path, "{s}/{s}", .{ xdg_runtime_dir, endpoint }, 0) catch
+        var self = Address{ .path = .{ .data = @splat(0), .is_from_endpoint = true } };
+        _ = std.fmt.bufPrintSentinel(&self.path.data, "{s}/{s}", .{ xdg_runtime_dir, endpoint }, 0) catch
             return error.PathTooLong;
         return self;
     }
@@ -54,25 +55,21 @@ pub const Address = union(enum) {
     /// Checks if `path.len` exceeds `std.Io.net.UnixAddress.max_len`.
     pub fn fromAbsolutePath(path: []const u8) Error!Address {
         if (path.len > std.Io.net.UnixAddress.max_len) return error.PathTooLong;
-        var self = Address{
-            .strategy = .path,
-            .info = .{ .path = @splat(0) },
-        };
-        @memcpy(self.info.path[0..path.len], path);
+        var self = Address{ .path = .{ .data = @splat(0), .is_from_endpoint = false } };
+        @memcpy(self.path.data[0..path.len], path);
         return self;
     }
 
     /// Provides formatted printing, useful for debugging connect-time errors.
     pub fn format(self: Address, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        switch (self.strategy) {
-            .sock => try w.print("socket fd '{d}'", .{self.info.sock}),
-            .name => {
-                const idx = if (std.mem.findScalarLast(u8, &self.info.path, '/')) |i| i + 1 else 0;
-                const endpoint = std.mem.sliceTo(self.info.path[idx..], 0);
+        switch (self) {
+            .sock => |s| try w.print("socket fd '{d}'", .{s}),
+            .path => |p| if (p.is_from_endpoint) {
+                const idx = if (std.mem.findScalarLast(u8, &p.data, '/')) |i| i + 1 else 0;
+                const endpoint = std.mem.sliceTo(p.data[idx..], 0);
                 try w.print("endpoint '{s}'", .{endpoint});
-            },
-            .path => {
-                const path = std.mem.sliceTo(&self.info.path, 0);
+            } else {
+                const path = std.mem.sliceTo(&p.data, 0);
                 try w.print("absolute path '{s}'", .{path});
             },
         }
