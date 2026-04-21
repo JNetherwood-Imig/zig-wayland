@@ -8,6 +8,7 @@ const Connection = @import("Connection.zig");
 const max_displays = 100;
 const endpoint_max_len = "wayland-99".len;
 const lock_suffix = ".lock";
+const log = std.log.scoped(.wayland);
 
 const Server = @This();
 
@@ -42,10 +43,10 @@ pub fn init(io: std.Io, env: *const std.process.Environ.Map) InitError!Server {
         lock_name = std.fmt.bufPrint(&lock_name_buf, "wayland-{}" ++ lock_suffix, .{display}) catch unreachable;
         // Succeeds if `XDG_RUNTIME_DIR/wayland-{display}.lock` can be successfully locked with an exclusive lock,
         // and `XDG_RUNTIME_DIR/wayland-{display}` can be removed if it exists.
-        break lockDisplay(io, xdg_runtime_dir, lock_name) catch |err| switch (err) {
-            error.LockFailed => continue,
-            else => |e| return e,
-        };
+        if (lockDisplay(io, xdg_runtime_dir, lock_name)) |lock| break lock else |err| {
+            log.debug("Failed to lock display wayland-{}: {t}.", .{ display, err });
+            continue;
+        }
     } else return error.NoDisplaysAvailable;
     errdefer {
         lock.close(io);
@@ -55,10 +56,10 @@ pub fn init(io: std.Io, env: *const std.process.Environ.Map) InitError!Server {
     var self = Server{
         .inner = undefined,
         .lock = lock,
-        .path = @splat(0),
+        .lock_path = @splat(0),
     };
 
-    const lock_path = try std.fmt.bufPrint(&self.path, "{s}/{s}", .{ xdg_runtime_dir_path, lock_name });
+    const lock_path = try std.fmt.bufPrint(&self.lock_path, "{s}/{s}", .{ xdg_runtime_dir_path, lock_name });
     const endpoint_path = std.mem.cutSuffix(u8, lock_path, lock_suffix).?;
     const addr = try std.Io.net.UnixAddress.init(endpoint_path);
     self.inner = try addr.listen(io, .{});
@@ -84,7 +85,8 @@ pub fn getFd(self: *const Server) std.posix.fd_t {
 
 /// Get the full socket path.
 pub fn socketPath(self: *const Server) []const u8 {
-    return std.mem.cutSuffix(u8, &self.lock_path, lock_suffix).?;
+    const lock_path = std.mem.sliceTo(&self.lock_path, 0);
+    return std.mem.cutSuffix(u8, lock_path, lock_suffix).?;
 }
 
 /// Get just the endpoint name.
