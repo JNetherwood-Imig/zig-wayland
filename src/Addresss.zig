@@ -14,16 +14,13 @@ pub const Address = union(enum) {
         InvalidFd,
     };
 
-    // FIXME: Should we check the validity of the returned address here rather than in Connection.init?
-    /// Uses the environment to try to find the parent server's socket.
-    ///
     /// If the `WAYLAND_SOCKET` environment variable exists and is set to an integer,
     /// it is interpreted as an open file descriptor and removed from the map.
     ///
     /// Otherwise, a path will be built using `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`. If `XDG_RUNTIME_DIR` does not exist,
     /// `Error.NoXdgRuntimeDir` will be returned. If `WAYLAND_DISPLAY` exists, then `XDG_RUNTIME_DIR/WAYLAND_DISPLAY` will be used.
     /// If `WAYLAND_DISPLAY` does not exist, `XDG_RUNTIME_DIR/wayland-0` will serve as a final fallback.
-    pub fn default(io: std.Io, env: *std.process.Environ.Map) Error!Address {
+    pub fn default(env: *std.process.Environ.Map) Error!Address {
         if (env.get("WAYLAND_SOCKET")) |sock_str| {
             if (std.fmt.parseInt(std.posix.fd_t, sock_str, 10)) |sock| {
                 _ = env.swapRemove("WAYLAND_SOCKET");
@@ -36,17 +33,15 @@ pub const Address = union(enum) {
         return .fromEndpoint(env, wayland_display);
     }
 
-    // FIXME: Should we validate the fd here?
     /// Directly initializes an Address using `sock`
-    pub fn fromFd(io: std.Io, sock: std.posix.fd_t) Error!Address {
+    pub fn fromFd(sock: std.posix.fd_t) Error!Address {
         return Address{
             return .{ .sock = sock },
         };
     }
 
-    // FIXME
     /// Concatenates `endpoint` with `XDG_RUNTIME_DIR` to make a path.
-    pub fn fromEndpoint(io: std.Io, env: *const std.process.Environ.Map, endpoint: []const u8) Error!Address {
+    pub fn fromEndpoint(env: *const std.process.Environ.Map, endpoint: []const u8) Error!Address {
         const xdg_runtime_dir = env.get("XDG_RUNTIME_DIR") orelse
             return error.NoXdgRuntimeDir;
         var self = Address{ .path = @splat(0) };
@@ -55,10 +50,9 @@ pub const Address = union(enum) {
         return self;
     }
 
-    // FIXME
     /// Directly initializes with `path`.
     /// Checks if `path.len` exceeds `std.Io.net.UnixAddress.max_len`.
-    pub fn fromAbsolutePath(io: std.Io, path: []const u8) Error!Address {
+    pub fn fromAbsolutePath(path: []const u8) Error!Address {
         if (path.len > std.Io.net.UnixAddress.max_len) return error.PathTooLong;
         var self = Address{
             .strategy = .path,
