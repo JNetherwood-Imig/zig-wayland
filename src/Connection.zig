@@ -670,6 +670,11 @@ const ObjectMap = struct {
             interfaces.len = new_memory.len;
             for (old_len..interfaces.len) |i|
                 interfaces[i] = null;
+
+            switch (side) {
+                .client => self.client = interfaces,
+                .server => self.server = interfaces,
+            }
         }
     }
 };
